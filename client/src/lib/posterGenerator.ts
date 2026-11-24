@@ -153,14 +153,14 @@ export interface PosterOptions {
 }
 
 /**
- * Draws a complete 1200x1700 high-resolution printable Poster on an HTML5 Canvas
+ * Draws a complete high-resolution printable Scanner Standee (A5 standard 1000x1414) on an HTML5 Canvas
  */
 export async function drawPosterCanvas(options: PosterOptions): Promise<HTMLCanvasElement> {
   const { shopName, city, slug, quote, rates, targetUrl } = options;
 
-  // High-res canvas: 1200 x 1700 (aspect ratio ~ 1:1.417 matches standard A4)
-  const width = 1200;
-  const height = 1700;
+  // High-res canvas: 1000 x 1414 (exact standard A5 aspect ratio 1:1.414 for tabletop scanner standees)
+  const width = 1000;
+  const height = 1414;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -173,92 +173,90 @@ export async function drawPosterCanvas(options: PosterOptions): Promise<HTMLCanv
 
   // Outer framing border
   ctx.strokeStyle = quote.borderTint;
-  ctx.lineWidth = 14;
-  ctx.strokeRect(7, 7, width - 14, height - 14);
+  ctx.lineWidth = 8;
+  ctx.strokeRect(4, 4, width - 8, height - 8);
 
   // 2. Top Header Accent Banner
-  const bannerHeight = 220;
+  const bannerHeight = 150;
   const grad = ctx.createLinearGradient(0, 0, width, bannerHeight);
   grad.addColorStop(0, quote.primaryColor);
   grad.addColorStop(1, quote.secondaryColor);
   ctx.fillStyle = grad;
-  ctx.fillRect(14, 14, width - 28, bannerHeight);
+  ctx.fillRect(8, 8, width - 16, bannerHeight);
 
   // Service pill in banner
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-  const servicePillY = 48;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+  const servicePillY = 22;
   if (ctx.roundRect) {
     ctx.beginPath();
-    ctx.roundRect(width / 2 - 180, servicePillY, 360, 36, 18);
+    ctx.roundRect(width / 2 - 140, servicePillY, 280, 26, 13);
     ctx.fill();
   }
   ctx.fillStyle = '#FFFFFF';
-  ctx.font = 'bold 16px "Plus Jakarta Sans", system-ui, sans-serif';
+  ctx.font = 'bold 12px "Plus Jakarta Sans", system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('⚡ OFFICIAL PRINTCART SMART COUNTER', width / 2, servicePillY + 23);
+  ctx.fillText('⚡ PRINTCART SMART COUNTER', width / 2, servicePillY + 17);
 
   // Shop Name in Banner
   ctx.fillStyle = '#FFFFFF';
-  ctx.font = '900 46px "Plus Jakarta Sans", system-ui, sans-serif';
-  const cleanShopName = (shopName || 'PRINT STUDIO').toUpperCase().slice(0, 35);
-  ctx.fillText(cleanShopName, width / 2, 138);
+  ctx.font = '900 36px "Plus Jakarta Sans", system-ui, sans-serif';
+  const cleanShopName = (shopName || 'PRINT STUDIO').toUpperCase().slice(0, 36);
+  ctx.fillText(cleanShopName, width / 2, 85);
 
   // City & Shop URL subtitle in Banner
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-  ctx.font = '600 20px "Plus Jakarta Sans", system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+  ctx.font = '600 16px "Plus Jakarta Sans", system-ui, sans-serif';
   const locText = city ? `${city} • printcart.in/s/${slug}` : `printcart.in/s/${slug}`;
-  ctx.fillText(locText, width / 2, 180);
+  ctx.fillText(locText, width / 2, 126);
 
   // 3. Catchy Quote Section
-  let curY = 275;
+  let curY = 185;
 
   // Quote Badge
   ctx.fillStyle = quote.accentBg;
   if (ctx.roundRect) {
     ctx.beginPath();
-    ctx.roundRect(width / 2 - 200, curY, 400, 42, 21);
+    ctx.roundRect(width / 2 - 170, curY, 340, 30, 15);
     ctx.fill();
   }
   ctx.strokeStyle = quote.borderTint;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.5;
   if (ctx.stroke) ctx.stroke();
 
   ctx.fillStyle = quote.primaryColor;
-  ctx.font = '800 17px "Plus Jakarta Sans", system-ui, sans-serif';
+  ctx.font = '800 13px "Plus Jakarta Sans", system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(quote.badge, width / 2, curY + 27);
+  ctx.fillText(quote.badge, width / 2, curY + 20);
 
-  curY += 75;
+  curY += 60;
 
   // Big Quote Headline
   ctx.fillStyle = '#0F172A';
-  ctx.font = '900 44px "Plus Jakarta Sans", system-ui, sans-serif';
+  ctx.font = '900 34px "Plus Jakarta Sans", system-ui, sans-serif';
   ctx.fillText(quote.headline, width / 2, curY);
 
-  curY += 45;
+  curY += 34;
 
   // Quote Subtitle
   ctx.fillStyle = '#475569';
-  ctx.font = '500 21px "Plus Jakarta Sans", system-ui, sans-serif';
+  ctx.font = '500 16px "Plus Jakarta Sans", system-ui, sans-serif';
   ctx.fillText(quote.subheadline, width / 2, curY);
 
-  curY += 45;
-
-  // 4. White Center QR Standee Card with Drop Shadow
-  const cardW = 540;
-  const cardH = 580;
+  // 4. White Center QR Standee Card with Drop Shadow (HUGE SCANNER SIZE)
+  const cardW = 860;
+  const cardH = 920;
   const cardX = (width - cardW) / 2;
-  const cardY = curY;
+  const cardY = 310;
 
   ctx.save();
-  ctx.shadowColor = 'rgba(15, 23, 42, 0.12)';
-  ctx.shadowBlur = 35;
-  ctx.shadowOffsetY = 15;
+  ctx.shadowColor = 'rgba(15, 23, 42, 0.10)';
+  ctx.shadowBlur = 30;
+  ctx.shadowOffsetY = 12;
 
   ctx.fillStyle = '#FFFFFF';
   ctx.beginPath();
   if (ctx.roundRect) {
-    ctx.roundRect(cardX, cardY, cardW, cardH, 32);
+    ctx.roundRect(cardX, cardY, cardW, cardH, 28);
   } else {
     ctx.rect(cardX, cardY, cardW, cardH);
   }
@@ -267,15 +265,16 @@ export async function drawPosterCanvas(options: PosterOptions): Promise<HTMLCanv
 
   // Card Border
   ctx.strokeStyle = '#E2E8F0';
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 2.5;
   if (ctx.roundRect) {
     ctx.beginPath();
-    ctx.roundRect(cardX, cardY, cardW, cardH, 32);
+    ctx.roundRect(cardX, cardY, cardW, cardH, 28);
     ctx.stroke();
   }
 
-  // Generate QR Code with Center Logo
-  const qrDataUrl = await generateQrWithLogo(targetUrl, 440);
+  // Generate Large QR Code with Center "P" Logo (670px size!)
+  const qrSize = 670;
+  const qrDataUrl = await generateQrWithLogo(targetUrl, qrSize);
   const qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
@@ -283,128 +282,96 @@ export async function drawPosterCanvas(options: PosterOptions): Promise<HTMLCanv
     img.src = qrDataUrl;
   });
 
-  const qrX = cardX + (cardW - 440) / 2;
-  const qrY = cardY + 35;
-  ctx.drawImage(qrImg, qrX, qrY, 440, 440);
+  const qrX = cardX + (cardW - qrSize) / 2;
+  const qrY = cardY + 28;
+  ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
-  // Bottom prompt under QR inside card
+  // Under QR prompt inside card
+  const promptY = qrY + qrSize + 48;
   ctx.fillStyle = '#0F172A';
-  ctx.font = '800 20px "Plus Jakarta Sans", system-ui, sans-serif';
-  ctx.fillText('👉 Camera, Google Lens ya Paytm/GPay se Scan Karein', width / 2, cardY + 510);
+  ctx.font = '800 22px "Plus Jakarta Sans", system-ui, sans-serif';
+  ctx.fillText('👉 Camera, Google Lens ya Paytm/GPay se Scan Karein', width / 2, promptY);
 
+  const urlY = promptY + 42;
   ctx.fillStyle = quote.primaryColor;
-  ctx.font = 'bold 15px "Plus Jakarta Sans", system-ui, sans-serif';
-  ctx.fillText(`printcart.in/s/${slug}`, width / 2, cardY + 542);
+  ctx.font = 'bold 18px "Plus Jakarta Sans", system-ui, sans-serif';
+  ctx.fillText(`printcart.in/s/${slug}`, width / 2, urlY);
 
-  // 5. Rates Row (if available)
-  curY = cardY + cardH + 40;
+  const helperY = urlY + 36;
+  ctx.fillStyle = '#64748B';
+  ctx.font = '600 13px "Plus Jakarta Sans", system-ui, sans-serif';
+  ctx.fillText('⚡ Instant Upload • Auto ID Card Merge • 100% Zero-Storage Privacy', width / 2, helperY);
+
+  // 5. Bottom Rates Row (Compact & Clean single strip)
   if (rates && (rates.bwRate || rates.colorRate || rates.idCardRate)) {
-    const rateBoxW = 780;
+    const rateBoxW = 760;
+    const rateBoxH = 50;
     const rateBoxX = (width - rateBoxW) / 2;
+    const rateBoxY = 1255;
+
     ctx.fillStyle = '#FFFFFF';
     ctx.strokeStyle = '#E2E8F0';
     ctx.lineWidth = 2;
     if (ctx.roundRect) {
       ctx.beginPath();
-      ctx.roundRect(rateBoxX, curY, rateBoxW, 70, 20);
+      ctx.roundRect(rateBoxX, rateBoxY, rateBoxW, rateBoxH, 25);
       ctx.fill();
       ctx.stroke();
     }
 
     const items = [
-      `B&W Print: ₹${rates.bwRate || 2}/page`,
-      `Color Print: ₹${rates.colorRate || 10}/page`,
-      `ID Card A4 Merge: ₹${rates.idCardRate || 10}`,
+      `B&W Print: ₹${rates.bwRate || 2}/pg`,
+      `Color Print: ₹${rates.colorRate || 10}/pg`,
+      `ID Card A4: ₹${rates.idCardRate || 10}`,
     ];
 
-    ctx.font = 'bold 20px "Plus Jakarta Sans", system-ui, sans-serif';
-    ctx.fillStyle = '#0F172A';
+    ctx.font = 'bold 16px "Plus Jakarta Sans", system-ui, sans-serif';
+    ctx.fillStyle = '#1E293B';
     const colStep = rateBoxW / items.length;
     items.forEach((item, idx) => {
-      ctx.fillText(item, rateBoxX + colStep * idx + colStep / 2, curY + 42);
+      ctx.fillText(item, rateBoxX + colStep * idx + colStep / 2, rateBoxY + 31);
     });
 
-    curY += 95;
+    // Small footer label under rates
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '600 12px "Plus Jakarta Sans", system-ui, sans-serif';
+    ctx.fillText('Official PrintCart Smart Counter Standee', width / 2, 1345);
   } else {
-    curY += 20;
+    // If no rates, clean footer label
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '600 13px "Plus Jakarta Sans", system-ui, sans-serif';
+    ctx.fillText('Official PrintCart Smart Counter Standee • 100% Zero-Storage', width / 2, 1290);
   }
-
-  // 6. 4-Step How It Works Row
-  const stepsBoxW = 960;
-  const stepsBoxX = (width - stepsBoxW) / 2;
-  const stepW = stepsBoxW / 4;
-
-  const steps = [
-    { num: '1', title: 'Scan QR', desc: 'Phone Camera / Lens' },
-    { num: '2', title: 'Upload File', desc: 'PDF / Photo / Aadhaar' },
-    { num: '3', title: 'Pay via UPI', desc: 'Exact Counter Bill' },
-    { num: '4', title: 'Collect Print', desc: 'Instant Ready Output' },
-  ];
-
-  steps.forEach((step, idx) => {
-    const cx = stepsBoxX + idx * stepW + stepW / 2;
-    const cy = curY;
-
-    // Step Number Circle
-    ctx.fillStyle = quote.primaryColor;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '900 18px "Plus Jakarta Sans", system-ui, sans-serif';
-    ctx.fillText(step.num, cx, cy + 6);
-
-    // Title
-    ctx.fillStyle = '#0F172A';
-    ctx.font = '800 19px "Plus Jakarta Sans", system-ui, sans-serif';
-    ctx.fillText(step.title, cx, cy + 44);
-
-    // Desc
-    ctx.fillStyle = '#64748B';
-    ctx.font = '500 15px "Plus Jakarta Sans", system-ui, sans-serif';
-    ctx.fillText(step.desc, cx, cy + 70);
-  });
-
-  // 7. Footer
-  const footerY = height - 70;
-  ctx.fillStyle = '#94A3B8';
-  ctx.font = '600 16px "Plus Jakarta Sans", system-ui, sans-serif';
-  ctx.fillText('🔒 Zero-Storage Privacy Policy • Files Permanently Auto-Deleted Immediately After Print', width / 2, footerY);
-
-  ctx.fillStyle = '#475569';
-  ctx.font = 'bold 15px "Plus Jakarta Sans", system-ui, sans-serif';
-  ctx.fillText('Made for Indian Photocopy Shops & Cyber Cafes • printcart.in', width / 2, footerY + 30);
 
   return canvas;
 }
 
 /**
- * Download the Poster as High-Resolution PNG (300 DPI equivalent)
+ * Download the Standee as High-Resolution PNG (300 DPI equivalent)
  */
 export async function downloadPosterPng(options: PosterOptions, fileName?: string): Promise<void> {
   const canvas = await drawPosterCanvas(options);
   const dataUrl = canvas.toDataURL('image/png', 1.0);
   const a = document.createElement('a');
   a.href = dataUrl;
-  a.download = fileName || `PrintCart_Poster_${options.slug}_${options.quote.id}.png`;
+  a.download = fileName || `PrintCart_Standee_${options.slug}_${options.quote.id}.png`;
   a.click();
 }
 
 /**
- * Generate and download an exact A4 or A5 printable PDF using pdf-lib
+ * Generate and download an exact A5 (tabletop scanner standee) or A4 printable PDF using pdf-lib
  */
 export async function downloadPosterPdf(
   options: PosterOptions,
-  paperSize: 'A4' | 'A5' = 'A4'
+  paperSize: 'A5' | 'A4' = 'A5'
 ): Promise<void> {
   const canvas = await drawPosterCanvas(options);
   const posterPngUrl = canvas.toDataURL('image/png', 1.0);
 
   const pdfDoc = await PDFDocument.create();
-  // A4: 595.28 x 841.89 pt | A5: 419.53 x 595.28 pt
-  const width = paperSize === 'A4' ? 595.28 : 419.53;
-  const height = paperSize === 'A4' ? 841.89 : 595.28;
+  // A5: 419.53 x 595.28 pt (Standee Standard) | A4: 595.28 x 841.89 pt
+  const width = paperSize === 'A5' ? 419.53 : 595.28;
+  const height = paperSize === 'A5' ? 595.28 : 841.89;
 
   const page = pdfDoc.addPage([width, height]);
   const pngBytes = await fetch(posterPngUrl).then((res) => res.arrayBuffer());
@@ -423,7 +390,7 @@ export async function downloadPosterPdf(
 
   const a = document.createElement('a');
   a.href = blobUrl;
-  a.download = `PrintCart_${paperSize}_Poster_${options.slug}_${options.quote.id}.pdf`;
+  a.download = `PrintCart_${paperSize}_Standee_${options.slug}_${options.quote.id}.pdf`;
   a.click();
 
   setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);

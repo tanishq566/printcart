@@ -32,7 +32,7 @@ export const StandeePage: React.FC = () => {
   const navigate = useNavigate();
 
   const [selectedQuote, setSelectedQuote] = useState<PosterQuote>(POSTER_QUOTES[0]);
-  const [paperSize, setPaperSize] = useState<'A4' | 'A5'>('A4');
+  const [paperSize, setPaperSize] = useState<'A5' | 'A4'>('A5');
   const [useProductionUrl, setUseProductionUrl] = useState(false);
   const [posterPreviewUrl, setPosterPreviewUrl] = useState<string>('');
   const [isRendering, setIsRendering] = useState(false);
@@ -250,12 +250,12 @@ export const StandeePage: React.FC = () => {
             {/* 2. Paper Size for PDF */}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-3">
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-                2. PDF Paper Size:
+                2. PDF Standee Paper Size:
               </label>
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { id: 'A4', label: 'A4 Size (Full Sheet)', desc: '210 × 297 mm • Wall / Big Stand' },
-                  { id: 'A5', label: 'A5 Size (Half Sheet)', desc: '148 × 210 mm • Counter Tabletop' },
+                  { id: 'A5', label: 'A5 Size (Tabletop Standee)', desc: '148 × 210 mm • Tabletop Scanner Stand (Recommended)' },
+                  { id: 'A4', label: 'A4 Size (Full Sheet)', desc: '210 × 297 mm • Wall / Door Poster' },
                 ].map((p) => (
                   <button
                     key={p.id}
@@ -320,17 +320,19 @@ export const StandeePage: React.FC = () => {
             <div className="bg-slate-900 text-white rounded-t-2xl px-5 py-3 w-full max-w-[480px] flex items-center justify-between text-xs font-bold border-t border-x border-slate-800">
               <span className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Live Counter Poster Preview</span>
+                <span>Live Counter Standee Preview</span>
               </span>
-              <span className="text-slate-400 font-mono">1200 × 1700 (300 DPI)</span>
+              <span className="text-emerald-400 font-mono bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/80">
+                A5 Tabletop Scanner Size
+              </span>
             </div>
 
             <div className="w-full max-w-[480px] bg-slate-950 p-4 rounded-b-2xl shadow-2xl border border-slate-800 flex items-center justify-center">
-              <div className="relative w-full aspect-[1/1.417] bg-white rounded-xl overflow-hidden shadow-xl border-4 border-slate-800 flex items-center justify-center">
+              <div className="relative w-full aspect-[1/1.414] bg-white rounded-xl overflow-hidden shadow-xl border-4 border-slate-800 flex items-center justify-center">
                 {isRendering ? (
                   <div className="text-center space-y-2 p-8">
                     <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto" />
-                    <p className="text-xs font-bold text-slate-700">Generating Poster Preview with "P" Logo...</p>
+                    <p className="text-xs font-bold text-slate-700">Generating Standee Preview with "P" Logo...</p>
                   </div>
                 ) : posterPreviewUrl ? (
                   <img
@@ -339,7 +341,7 @@ export const StandeePage: React.FC = () => {
                     className="w-full h-full object-contain select-none"
                   />
                 ) : (
-                  <div className="text-slate-400 text-xs">Loading poster...</div>
+                  <div className="text-slate-400 text-xs">Loading standee...</div>
                 )}
               </div>
             </div>

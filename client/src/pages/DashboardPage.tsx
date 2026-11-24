@@ -366,7 +366,7 @@ export const DashboardPage: React.FC = () => {
   const [selectedQuote, setSelectedQuote] = useState<PosterQuote>(POSTER_QUOTES[0]);
   const [posterPreviewUrl, setPosterPreviewUrl] = useState<string>('');
   const [isGeneratingPoster, setIsGeneratingPoster] = useState<boolean>(false);
-  const [posterPaperSize, setPosterPaperSize] = useState<'A4' | 'A5'>('A4');
+  const [posterPaperSize, setPosterPaperSize] = useState<'A5' | 'A4'>('A5');
   const [downloadingFormat, setDownloadingFormat] = useState<'none' | 'png' | 'pdf'>('none');
 
   useEffect(() => {
@@ -1145,21 +1145,23 @@ export const DashboardPage: React.FC = () => {
                 <div className="flex items-center justify-between w-full mb-3 text-[11px] font-bold text-slate-400">
                   <span className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    Live Poster Preview
+                    Live Standee Preview
                   </span>
-                  <span className="text-slate-500 font-mono">1200 × 1700 (300 DPI)</span>
+                  <span className="text-emerald-400 font-mono bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/80">
+                    A5 Tabletop Scanner Size
+                  </span>
                 </div>
 
-                <div className="relative w-full max-w-[340px] aspect-[1/1.417] bg-white rounded-xl shadow-2xl border-4 border-slate-800 overflow-hidden flex items-center justify-center">
+                <div className="relative w-full max-w-[340px] aspect-[1/1.414] bg-white rounded-xl shadow-2xl border-4 border-slate-800 overflow-hidden flex items-center justify-center">
                   {isGeneratingPoster ? (
                     <div className="text-center space-y-2 p-6">
                       <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto" />
-                      <p className="text-xs font-bold text-slate-600">Rendering Poster with Quotes & "P" Logo...</p>
+                      <p className="text-xs font-bold text-slate-600">Generating Standee with "P" Logo...</p>
                     </div>
                   ) : posterPreviewUrl ? (
                     <img
                       src={posterPreviewUrl}
-                      alt="PrintCart Official Poster"
+                      alt="PrintCart Official Standee"
                       className="w-full h-full object-contain select-none"
                     />
                   ) : (
@@ -1168,7 +1170,7 @@ export const DashboardPage: React.FC = () => {
                 </div>
 
                 <p className="text-[11px] text-slate-400 mt-3 text-center">
-                  💡 QR code ke center mein <strong className="text-white">"P" symbol</strong> embedded hai jo har camera se 100% scan hota hai.
+                  💡 Scanner size <strong className="text-white">bada</strong> kar diya gaya hai aur QR ke center mein <strong className="text-white">"P" symbol</strong> embedded hai.
                 </p>
               </div>
 
@@ -1177,7 +1179,7 @@ export const DashboardPage: React.FC = () => {
                 {/* 1. Quote Selection */}
                 <div>
                   <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-2">
-                    1. Choose Poster Quote / Slogan:
+                    1. Choose Standee Slogan / Quote:
                   </label>
                   <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                     {POSTER_QUOTES.map((q) => {
@@ -1220,12 +1222,12 @@ export const DashboardPage: React.FC = () => {
                 {/* 2. Paper Size for PDF */}
                 <div>
                   <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-                    2. PDF Print Size:
+                    2. Print Format (Default: A5 Standee):
                   </label>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { id: 'A4', label: 'A4 Poster (Standard Counter Wall / Standee)' },
-                      { id: 'A5', label: 'A5 Standee (Compact Tabletop)' },
+                      { id: 'A5', label: 'A5 Standee (Tabletop Scanner - Best)' },
+                      { id: 'A4', label: 'A4 Poster (Wall / Door Print)' },
                     ].map((p) => (
                       <button
                         key={p.id}
@@ -1252,12 +1254,12 @@ export const DashboardPage: React.FC = () => {
                     {downloadingFormat === 'png' ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Generating High-Res PNG...</span>
+                        <span>Generating High-Res Standee PNG...</span>
                       </>
                     ) : (
                       <>
                         <Download className="w-4 h-4" />
-                        <span>Download High-Res Poster (PNG)</span>
+                        <span>Download Standee Image (PNG)</span>
                       </>
                     )}
                   </button>
