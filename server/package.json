@@ -24,12 +24,9 @@
     "@aws-sdk/s3-request-presigner": "^3.700.0",
     "express-rate-limit": "^7.4.1",
     "node-cron": "^3.0.3",
-    "dotenv": "^16.4.7"
-  },
-  "devDependencies": {
+    "dotenv": "^16.4.7",
     "typescript": "~5.7.0",
     "tsx": "^4.19.2",
-    "nodemon": "^3.1.9",
     "prisma": "^6.2.0",
     "@types/express": "^5.0.0",
     "@types/cors": "^2.8.17",
@@ -38,5 +35,8 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/node-cron": "^3.0.11",
     "@types/node": "^22.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
   }
 }
