@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import * as pdfjsLib from 'pdfjs-dist';
+import QRCode from 'qrcode';
 import {
   Printer,
   ShieldCheck,
@@ -191,9 +192,11 @@ interface KpiProps {
   stats: TodayStats;
   shop: any;
   jobCount: number;
+  hasGeneratedQr: boolean;
+  onOpenQr: () => void;
 }
 
-const KpiCards: React.FC<KpiProps> = ({ stats, shop, jobCount }) => {
+const KpiCards: React.FC<KpiProps> = ({ stats, shop, jobCount, hasGeneratedQr, onOpenQr }) => {
   const [copied, setCopied] = useState(false);
 
   const copyLink = () => {
@@ -244,15 +247,27 @@ const KpiCards: React.FC<KpiProps> = ({ stats, shop, jobCount }) => {
         </div>
       ))}
 
-      {/* Shop Link card */}
-      <div className="bg-slate-900/60 border border-slate-700/40 rounded-xl px-3 py-2.5 flex items-center gap-2 col-span-2 lg:col-span-1">
-        <QrCode className="w-5 h-5 text-violet-400 shrink-0" />
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-mono text-slate-400 truncate">
-            /s/{shop?.slug}
-          </p>
-          <p className="text-[10px] text-slate-600 leading-tight">Your Shop Link</p>
-        </div>
+      {/* Shop Link card with Generate / Show QR Button */}
+      <div className="bg-slate-900/60 border border-slate-700/40 rounded-xl px-3 py-2 flex items-center justify-between gap-2 col-span-2 lg:col-span-1">
+        <button
+          onClick={onOpenQr}
+          className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-90 transition group flex-1"
+          title={hasGeneratedQr ? 'Show / Download Shop QR Code' : 'Generate Counter QR Code'}
+        >
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition ${
+            hasGeneratedQr ? 'bg-indigo-950 text-indigo-400 border border-indigo-800/60' : 'bg-gradient-to-tr from-blue-600 to-emerald-500 text-white animate-pulse'
+          }`}>
+            <QrCode className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-white flex items-center gap-1">
+              <span>{hasGeneratedQr ? 'Show QR' : 'Generate QR'}</span>
+              <span className="text-[10px] text-slate-500 group-hover:text-blue-400">↗</span>
+            </p>
+            <p className="text-[10px] font-mono text-slate-400 truncate">/s/{shop?.slug}</p>
+          </div>
+        </button>
+
         <button
           onClick={copyLink}
           className={`shrink-0 p-1.5 rounded-lg transition ${copied ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}
@@ -266,11 +281,21 @@ const KpiCards: React.FC<KpiProps> = ({ stats, shop, jobCount }) => {
 };
 
 /* ─── Empty State ─────────────────────────────────────────────────────── */
-const EmptyState: React.FC<{ shop: any }> = ({ shop }) => (
+interface EmptyStateProps {
+  shop: any;
+  hasGeneratedQr: boolean;
+  onOpenQr: () => void;
+}
+
+const EmptyState: React.FC<EmptyStateProps> = ({ shop, hasGeneratedQr, onOpenQr }) => (
   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
     <div className="bg-slate-900 border border-slate-700/60 rounded-2xl p-8 max-w-sm w-full shadow-xl space-y-5">
       {/* QR mini */}
-      <div className="mx-auto w-28 h-28 bg-white rounded-xl flex items-center justify-center shadow-md">
+      <div
+        onClick={onOpenQr}
+        className="mx-auto w-28 h-28 bg-white rounded-xl flex items-center justify-center shadow-md cursor-pointer hover:scale-105 transition"
+        title={hasGeneratedQr ? 'Click to Show QR' : 'Click to Generate QR'}
+      >
         <svg width="88" height="88" viewBox="0 0 88 88">
           <rect width="88" height="88" fill="white" rx="4" />
           <rect x="6" y="6" width="22" height="22" rx="2" fill="#1e40af" />
@@ -297,13 +322,13 @@ const EmptyState: React.FC<{ shop: any }> = ({ shop }) => (
       </div>
 
       <div className="flex flex-col gap-2">
-        <Link
-          to="/dashboard/standee"
-          className="flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-sm rounded-xl shadow-md hover:-translate-y-0.5 transition"
+        <button
+          onClick={onOpenQr}
+          className="flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 text-white font-bold text-sm rounded-xl shadow-md hover:-translate-y-0.5 transition"
         >
-          <Download className="w-4 h-4" />
-          Download A4 Standee
-        </Link>
+          <QrCode className="w-4 h-4 text-emerald-300" />
+          {hasGeneratedQr ? 'Show QR & Standee' : '✨ Generate QR & Standee'}
+        </button>
         {shop?.slug && (
           <a
             href={`/s/${shop.slug}`}
@@ -327,6 +352,40 @@ export const DashboardPage: React.FC = () => {
   const { isInstallable, promptInstall } = usePwaInstall();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Shop QR Generation / Display State
+  const [hasGeneratedQr, setHasGeneratedQr] = useState<boolean>(false);
+  const [showQrModal, setShowQrModal] = useState<boolean>(false);
+  const [dashboardQrUrl, setDashboardQrUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (shop?.id) {
+      const generated = localStorage.getItem(`printcart_qr_generated_${shop.id}`) === 'true';
+      setHasGeneratedQr(generated);
+    }
+  }, [shop?.id]);
+
+  useEffect(() => {
+    if (shop?.slug) {
+      const targetUrl = `${window.location.origin}/s/${shop.slug}`;
+      QRCode.toDataURL(targetUrl, {
+        width: 600,
+        margin: 1,
+        color: { dark: '#0F172A', light: '#FFFFFF' },
+        errorCorrectionLevel: 'H',
+      })
+        .then((url) => setDashboardQrUrl(url))
+        .catch((err) => console.error('Dashboard QR generation error:', err));
+    }
+  }, [shop?.slug]);
+
+  const handleOpenQrModal = () => {
+    setShowQrModal(true);
+    if (!hasGeneratedQr && shop?.id) {
+      localStorage.setItem(`printcart_qr_generated_${shop.id}`, 'true');
+      setHasGeneratedQr(true);
+    }
+  };
 
   const [socketConnected, setSocketConnected] = useState(false);
   const [isCounterOpen, setIsCounterOpen] = useState(true);
@@ -678,6 +737,20 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Generate QR / Show QR Button */}
+            <button
+              onClick={handleOpenQrModal}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 shadow-xs ${
+                hasGeneratedQr
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  : 'bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 text-white border-transparent animate-pulse hover:opacity-95'
+              }`}
+              title={hasGeneratedQr ? 'Show Your Counter QR Code' : 'Generate Counter QR Code'}
+            >
+              <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{hasGeneratedQr ? 'Show QR' : 'Generate QR'}</span>
+            </button>
+
             {/* Sound toggle */}
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
@@ -724,7 +797,13 @@ export const DashboardPage: React.FC = () => {
         <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
 
         {/* KPI Cards */}
-        <KpiCards stats={stats} shop={shop} jobCount={jobs.length} />
+        <KpiCards
+          stats={stats}
+          shop={shop}
+          jobCount={jobs.length}
+          hasGeneratedQr={hasGeneratedQr}
+          onOpenQr={handleOpenQrModal}
+        />
 
         {/* Reprint undo toast */}
         {reprintUndo && (
@@ -935,11 +1014,105 @@ export const DashboardPage: React.FC = () => {
                 </div>
               </>
             ) : (
-              <EmptyState shop={shop} />
+              <EmptyState
+                shop={shop}
+                hasGeneratedQr={hasGeneratedQr}
+                onOpenQr={handleOpenQrModal}
+              />
             )}
           </div>
         </div>
       </div>
+
+      {/* ── QR CODE MODAL ── */}
+      {showQrModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+            <button
+              onClick={() => setShowQrModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+              title="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="text-center space-y-4">
+              <div>
+                <span className="text-[10px] uppercase font-mono font-extrabold text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-800/80">
+                  {hasGeneratedQr ? 'Counter QR Ready' : 'New QR Generated'}
+                </span>
+                <h3 className="text-lg font-bold text-white mt-2">{shop?.shopName || 'Shop Counter QR'}</h3>
+                <p className="text-xs text-slate-400">Customer scan karega aur direct aapke counter par file bhejega.</p>
+              </div>
+
+              {/* The Scannable QR Code */}
+              <div className="p-3 bg-white rounded-2xl inline-block shadow-lg border-2 border-indigo-200">
+                {dashboardQrUrl ? (
+                  <img src={dashboardQrUrl} alt="Shop Counter QR" className="w-48 h-48 rounded-lg" />
+                ) : (
+                  <div className="w-48 h-48 flex items-center justify-center">
+                    <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+                  </div>
+                )}
+              </div>
+
+              {/* Shop URL */}
+              <div className="bg-slate-950/80 rounded-xl px-3 py-2 border border-slate-800 flex items-center justify-between gap-2">
+                <span className="text-xs font-mono text-blue-400 truncate">
+                  {window.location.origin}/s/{shop?.slug}
+                </span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/s/${shop?.slug}`);
+                    alert('Shop Link copied to clipboard!');
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition shrink-0"
+                  title="Copy"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Actions */}
+              <div className="space-y-2 pt-1">
+                <Link
+                  to="/dashboard/standee"
+                  className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 shadow-md transition"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Customize & Print A4 Standee</span>
+                </Link>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      if (!dashboardQrUrl) return;
+                      const a = document.createElement('a');
+                      a.href = dashboardQrUrl;
+                      a.download = `PrintCart_QR_${shop?.slug || 'shop'}.png`;
+                      a.click();
+                    }}
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition border border-slate-700"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Download PNG</span>
+                  </button>
+
+                  <a
+                    href={`/s/${shop?.slug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition border border-slate-700"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Open Customer</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

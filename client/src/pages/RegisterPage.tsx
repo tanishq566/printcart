@@ -95,7 +95,7 @@ export const RegisterPage: React.FC = () => {
         idCardRate: Number(idCardRate) || 10,
       });
 
-      navigate('/dashboard/settings');
+      navigate('/dashboard');
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {
