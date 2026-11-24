@@ -18,7 +18,8 @@ export class LocalStorageAdapter implements StorageService {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = `http://localhost:${env.PORT}/api/dev-storage`;
+    // Relative API path so it works in both local dev (via Vite proxy) and production (Render/HTTPS)
+    this.baseUrl = '/api/dev-storage';
     this.ensureUploadDir();
     console.log('📁 Storage: Local dev adapter initialized (tmp/uploads)');
   }

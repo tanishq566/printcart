@@ -303,9 +303,19 @@ export const ShopUploadPage: React.FC = () => {
         }),
       });
 
-      // 2. Direct upload to Presigned PUT URL
+      // 2. Direct upload to Presigned PUT URL (safely normalize if localhost was returned on production)
       setUploadProgress('Uploading file to secure buffer...');
-      const uploadRes = await fetch(initRes.uploadUrl, {
+      let uploadTarget = initRes.uploadUrl;
+      if (uploadTarget.startsWith('http://localhost') || uploadTarget.startsWith('http://127.0.0.1')) {
+        try {
+          const parsed = new URL(uploadTarget);
+          uploadTarget = parsed.pathname + parsed.search;
+        } catch {
+          // fallback to raw url
+        }
+      }
+
+      const uploadRes = await fetch(uploadTarget, {
         method: 'PUT',
         headers: {
           'Content-Type': selectedFile.type,
@@ -424,8 +434,18 @@ export const ShopUploadPage: React.FC = () => {
         }),
       });
 
-      // 3. Upload merged PDF to presigned URL
-      const uploadRes = await fetch(initRes.uploadUrl, {
+      // 3. Upload merged PDF to presigned URL (safely normalize if localhost was returned on production)
+      let idUploadTarget = initRes.uploadUrl;
+      if (idUploadTarget.startsWith('http://localhost') || idUploadTarget.startsWith('http://127.0.0.1')) {
+        try {
+          const parsed = new URL(idUploadTarget);
+          idUploadTarget = parsed.pathname + parsed.search;
+        } catch {
+          // fallback to raw url
+        }
+      }
+
+      const uploadRes = await fetch(idUploadTarget, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/pdf',

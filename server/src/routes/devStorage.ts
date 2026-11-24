@@ -1,45 +1,56 @@
 import { Router } from 'express';
-import fs from 'fs/promises';
+import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
+import { pipeline } from 'stream/promises';
 import { LocalStorageAdapter } from '../services/storage/LocalStorageAdapter.js';
 
 const router = Router();
 
+// Handle CORS preflight for simulated presigned PUT
+router.options(['/upload/:key', '/upload/*'], (_req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'PUT, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.sendStatus(204);
+});
+
 /**
- * DEV ONLY: Simulated presigned PUT — receives file upload for local storage.
+ * DEV/LOCAL: Simulated presigned PUT — receives file upload for local storage.
+ * Supports wildcard to handle subdirectories like shops/:shopId/:file.ext
  */
-router.put('/upload/:key', async (req, res) => {
+router.put(['/upload/:key', '/upload/*'], async (req, res) => {
   try {
-    const key = decodeURIComponent(req.params.key);
+    const rawKey = (req.params as any)[0] || req.params.key;
+    const key = decodeURIComponent(rawKey).replace(/^\/+/, '');
     const filePath = LocalStorageAdapter.getFilePath(key);
 
     // Ensure parent directory exists
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
 
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', async () => {
-      const buffer = Buffer.concat(chunks);
-      await fs.writeFile(filePath, buffer);
-      console.log(`📁 Dev upload: ${key} (${buffer.length} bytes)`);
-      res.status(200).json({ success: true });
-    });
+    // Stream directly to file on disk
+    const writeStream = fs.createWriteStream(filePath);
+    await pipeline(req, writeStream);
+
+    console.log(`📁 Local storage upload: ${key} saved to disk`);
+    res.status(200).json({ success: true });
   } catch (err) {
-    console.error('Dev upload error:', err);
+    console.error('Local storage upload error:', err);
     res.status(500).json({ error: 'Upload failed' });
   }
 });
 
 /**
- * DEV ONLY: Simulated presigned GET — serves file from local storage.
+ * DEV/LOCAL: Simulated presigned GET — serves file from local storage.
  */
-router.get('/download/:key', async (req, res) => {
+router.get(['/download/:key', '/download/*'], async (req, res) => {
   try {
-    const key = decodeURIComponent(req.params.key);
+    const rawKey = (req.params as any)[0] || req.params.key;
+    const key = decodeURIComponent(rawKey).replace(/^\/+/, '');
     const filePath = LocalStorageAdapter.getFilePath(key);
 
-    const stat = await fs.stat(filePath);
-    const data = await fs.readFile(filePath);
+    const stat = await fsp.stat(filePath);
+    const data = await fsp.readFile(filePath);
 
     // Infer content type from extension
     const ext = path.extname(key).toLowerCase();

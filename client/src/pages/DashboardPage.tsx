@@ -631,7 +631,16 @@ export const DashboardPage: React.FC = () => {
     )
       .then(async (res) => {
         if (!active) return;
-        const fileRes = await fetch(res.previewUrl);
+        let previewTarget = res.previewUrl;
+        if (previewTarget.startsWith('http://localhost') || previewTarget.startsWith('http://127.0.0.1')) {
+          try {
+            const parsed = new URL(previewTarget);
+            previewTarget = parsed.pathname + parsed.search;
+          } catch {
+            // fallback
+          }
+        }
+        const fileRes = await fetch(previewTarget);
         const blob = await fileRes.blob();
         if (!active) return;
         const blobUrl = URL.createObjectURL(blob);
