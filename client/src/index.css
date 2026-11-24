@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+/* ===== PrintCart Design Tokens ===== */
+@theme {
+  --font-sans: 'Plus Jakarta Sans', 'Noto Sans Devanagari', system-ui, sans-serif;
+  --font-hindi: 'Noto Sans Devanagari', 'Plus Jakarta Sans', system-ui, sans-serif;
+
+  /* Primary Palette */
+  --color-primary: #2563EB;
+  --color-primary-hover: #1D4ED8;
+  --color-primary-light: #DBEAFE;
+
+  /* Semantic Colors */
+  --color-success: #10B981;
+  --color-success-light: #D1FAE5;
+  --color-warning: #F59E0B;
+  --color-warning-light: #FEF3C7;
+  --color-danger: #EF4444;
+  --color-danger-light: #FEE2E2;
+  --color-teal: #0D9488;
+  --color-teal-light: #CCFBF1;
+
+  /* Surface */
+  --color-surface: #FFFFFF;
+  --color-background: #F8FAFC;
+}
+
+/* ===== Base Styles ===== */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-background);
+}
+
+/* Tabular nums for prices, tokens, timers */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

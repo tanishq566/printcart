@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SHOPKEEPER
+  SUPER_ADMIN
+}
+
+enum PlanStatus {
+  TRIAL
+  ACTIVE_LAUNCH
+  EXPIRED
+  SUSPENDED
+}
+
+enum JobType {
+  NORMAL
+  ID_CARD
+}
+
+enum ColorMode {
+  BW
+  COLOR
+}
+
+enum PrintSides {
+  SINGLE
+  DOUBLE
+}
+
+enum JobStatus {
+  UPLOADING
+  PENDING
+  REVIEWING
+  PRINTING
+  COMPLETED
+  REJECTED
+  EXPIRED
+}
+
+model Shop {
+  id            String     @id @default(cuid())
+  shopName      String
+  slug          String     @unique
+  ownerPhone    String     @unique
+  passwordHash  String
+  city          String?
+  upiId         String?
+  role          Role       @default(SHOPKEEPER)
+
+  // Pricing Configuration (in INR)
+  bwRate        Float      @default(2)
+  colorRate     Float      @default(10)
+  idCardRate    Float      @default(10)
+
+  // Operational & Subscription State
+  isCounterOpen Boolean    @default(true)
+  planStatus    PlanStatus @default(TRIAL)
+  trialEndsAt   DateTime?
+  paidAt        DateTime?
+  dailyTokenSeq Int        @default(0)
+  lastTokenDate String?    // YYYY-MM-DD in IST for daily token reset
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  printJobs     PrintJob[]
+  payments      Payment[]
+}
+
+model PrintJob {
+  id             String     @id @default(cuid())
+  shopId         String
+  shop           Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  tokenNumber    Int
+  customerName   String?    @default("Walk-in")
+  jobType        JobType    @default(NORMAL)
+
+  // File metadata (wiped after print/reject/expiry)
+  fileName       String?
+  mimeType       String
+  fileSizeBytes  Int
+  r2ObjectKey    String?    // Set to null immediately after R2 deletion
+
+  // Print specifications
+  pageCount      Int        @default(1)
+  copies         Int        @default(1)
+  colorMode      ColorMode  @default(BW)
+  sides          PrintSides @default(SINGLE)
+  estimatedPrice Float      @default(0)
+
+  status         JobStatus  @default(UPLOADING)
+  rejectReason   String?
+
+  expiresAt      DateTime   // createdAt + 15 minutes
+  deletedAt      DateTime?
+  createdAt      DateTime   @default(now())
+
+  @@index([shopId, status])
+  @@index([expiresAt])
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  shopId          String
+  shop            Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  amountInr       Int      @default(499)
+  merchantOrderId String   @unique
+  phonepeTxnId    String?
+  gateway         String   @default("PHONEPE")
+  status          String   @default("CREATED") // CREATED, PAID, FAILED
+  createdAt       DateTime @default(now())
+}

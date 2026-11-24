@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+server/prisma/*.db
+server/prisma/migrations/
+
+# Temp uploads (local dev storage)
+tmp/
+server/tmp/
+
+# Logs
+*.log
+npm-debug.log*
+
+# PWA generated
+client/dev-dist/
