@@ -4,6 +4,13 @@ import { io, Socket } from 'socket.io-client';
 import * as pdfjsLib from 'pdfjs-dist';
 import QRCode from 'qrcode';
 import {
+  POSTER_QUOTES,
+  PosterQuote,
+  drawPosterCanvas,
+  downloadPosterPng,
+  downloadPosterPdf,
+} from '../lib/posterGenerator';
+import {
   Printer,
   ShieldCheck,
   Volume2,
@@ -353,10 +360,14 @@ export const DashboardPage: React.FC = () => {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Shop QR Generation / Display State
+  // Shop QR & Poster Generation / Display State
   const [hasGeneratedQr, setHasGeneratedQr] = useState<boolean>(false);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
-  const [dashboardQrUrl, setDashboardQrUrl] = useState<string>('');
+  const [selectedQuote, setSelectedQuote] = useState<PosterQuote>(POSTER_QUOTES[0]);
+  const [posterPreviewUrl, setPosterPreviewUrl] = useState<string>('');
+  const [isGeneratingPoster, setIsGeneratingPoster] = useState<boolean>(false);
+  const [posterPaperSize, setPosterPaperSize] = useState<'A4' | 'A5'>('A4');
+  const [downloadingFormat, setDownloadingFormat] = useState<'none' | 'png' | 'pdf'>('none');
 
   useEffect(() => {
     if (shop?.id) {
@@ -365,25 +376,97 @@ export const DashboardPage: React.FC = () => {
     }
   }, [shop?.id]);
 
+  // Generate live Poster preview whenever modal opens or quote changes
   useEffect(() => {
-    if (shop?.slug) {
-      const targetUrl = `${window.location.origin}/s/${shop.slug}`;
-      QRCode.toDataURL(targetUrl, {
-        width: 600,
-        margin: 1,
-        color: { dark: '#0F172A', light: '#FFFFFF' },
-        errorCorrectionLevel: 'H',
+    if (!showQrModal || !shop?.slug) return;
+    let active = true;
+    setIsGeneratingPoster(true);
+
+    const targetUrl = `${window.location.origin}/s/${shop.slug}`;
+    drawPosterCanvas({
+      shopName: shop.shopName || 'Shop Counter',
+      city: shop.city,
+      slug: shop.slug,
+      quote: selectedQuote,
+      rates: {
+        bwRate: shop.bwRate,
+        colorRate: shop.colorRate,
+        idCardRate: shop.idCardRate,
+      },
+      targetUrl,
+    })
+      .then((canvas) => {
+        if (!active) return;
+        setPosterPreviewUrl(canvas.toDataURL('image/png'));
       })
-        .then((url) => setDashboardQrUrl(url))
-        .catch((err) => console.error('Dashboard QR generation error:', err));
-    }
-  }, [shop?.slug]);
+      .catch((err) => console.error('Poster preview generation error:', err))
+      .finally(() => {
+        if (active) setIsGeneratingPoster(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [showQrModal, selectedQuote, shop]);
 
   const handleOpenQrModal = () => {
     setShowQrModal(true);
     if (!hasGeneratedQr && shop?.id) {
       localStorage.setItem(`printcart_qr_generated_${shop.id}`, 'true');
       setHasGeneratedQr(true);
+    }
+  };
+
+  const handleDownloadPosterPng = async () => {
+    if (!shop?.slug) return;
+    try {
+      setDownloadingFormat('png');
+      const targetUrl = `${window.location.origin}/s/${shop.slug}`;
+      await downloadPosterPng({
+        shopName: shop.shopName || 'Shop Counter',
+        city: shop.city,
+        slug: shop.slug,
+        quote: selectedQuote,
+        rates: {
+          bwRate: shop.bwRate,
+          colorRate: shop.colorRate,
+          idCardRate: shop.idCardRate,
+        },
+        targetUrl,
+      });
+    } catch (e) {
+      console.error(e);
+      alert('Failed to download poster');
+    } finally {
+      setDownloadingFormat('none');
+    }
+  };
+
+  const handleDownloadPosterPdf = async () => {
+    if (!shop?.slug) return;
+    try {
+      setDownloadingFormat('pdf');
+      const targetUrl = `${window.location.origin}/s/${shop.slug}`;
+      await downloadPosterPdf(
+        {
+          shopName: shop.shopName || 'Shop Counter',
+          city: shop.city,
+          slug: shop.slug,
+          quote: selectedQuote,
+          rates: {
+            bwRate: shop.bwRate,
+            colorRate: shop.colorRate,
+            idCardRate: shop.idCardRate,
+          },
+          targetUrl,
+        },
+        posterPaperSize
+      );
+    } catch (e) {
+      console.error(e);
+      alert('Failed to download PDF');
+    } finally {
+      setDownloadingFormat('none');
     }
   };
 
@@ -1024,89 +1107,184 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── QR CODE MODAL ── */}
+      {/* ── COUNTER POSTER & QR STUDIO MODAL ── */}
       {showQrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
-            <button
-              onClick={() => setShowQrModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
-              title="Close"
-            >
-              <X className="w-5 h-5" />
-            </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 my-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-emerald-500 flex items-center justify-center text-white shadow-md">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <span>Shop Counter Poster & QR Studio</span>
+                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-800">
+                      Active
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {shop?.shopName} • <span className="text-blue-400 font-mono">printcart.in/s/{shop?.slug}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowQrModal(false)}
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-            <div className="text-center space-y-4">
-              <div>
-                <span className="text-[10px] uppercase font-mono font-extrabold text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-800/80">
-                  {hasGeneratedQr ? 'Counter QR Ready' : 'New QR Generated'}
-                </span>
-                <h3 className="text-lg font-bold text-white mt-2">{shop?.shopName || 'Shop Counter QR'}</h3>
-                <p className="text-xs text-slate-400">Customer scan karega aur direct aapke counter par file bhejega.</p>
+            {/* Modal 2-Column Split: Poster Preview (Left) + Customizer & Downloads (Right) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Column: Live Rendered Poster Preview */}
+              <div className="lg:col-span-6 flex flex-col items-center bg-slate-950/80 rounded-2xl p-4 border border-slate-800">
+                <div className="flex items-center justify-between w-full mb-3 text-[11px] font-bold text-slate-400">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Live Poster Preview
+                  </span>
+                  <span className="text-slate-500 font-mono">1200 × 1700 (300 DPI)</span>
+                </div>
+
+                <div className="relative w-full max-w-[340px] aspect-[1/1.417] bg-white rounded-xl shadow-2xl border-4 border-slate-800 overflow-hidden flex items-center justify-center">
+                  {isGeneratingPoster ? (
+                    <div className="text-center space-y-2 p-6">
+                      <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto" />
+                      <p className="text-xs font-bold text-slate-600">Rendering Poster with Quotes & "P" Logo...</p>
+                    </div>
+                  ) : posterPreviewUrl ? (
+                    <img
+                      src={posterPreviewUrl}
+                      alt="PrintCart Official Poster"
+                      className="w-full h-full object-contain select-none"
+                    />
+                  ) : (
+                    <div className="text-slate-400 text-xs">Generating preview...</div>
+                  )}
+                </div>
+
+                <p className="text-[11px] text-slate-400 mt-3 text-center">
+                  💡 QR code ke center mein <strong className="text-white">"P" symbol</strong> embedded hai jo har camera se 100% scan hota hai.
+                </p>
               </div>
 
-              {/* The Scannable QR Code */}
-              <div className="p-3 bg-white rounded-2xl inline-block shadow-lg border-2 border-indigo-200">
-                {dashboardQrUrl ? (
-                  <img src={dashboardQrUrl} alt="Shop Counter QR" className="w-48 h-48 rounded-lg" />
-                ) : (
-                  <div className="w-48 h-48 flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+              {/* Right Column: Quote Selector & Download Actions */}
+              <div className="lg:col-span-6 space-y-5">
+                {/* 1. Quote Selection */}
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                    1. Choose Poster Quote / Slogan:
+                  </label>
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                    {POSTER_QUOTES.map((q) => {
+                      const isSelected = selectedQuote.id === q.id;
+                      return (
+                        <button
+                          key={q.id}
+                          onClick={() => setSelectedQuote(q)}
+                          className={`w-full text-left p-3 rounded-xl border transition flex items-start justify-between gap-2.5 ${
+                            isSelected
+                              ? 'bg-slate-800/90 border-blue-500 shadow-sm ring-1 ring-blue-500/30'
+                              : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:bg-slate-850 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <span
+                              className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md inline-block mb-1"
+                              style={{
+                                color: q.primaryColor,
+                                backgroundColor: isSelected ? 'rgba(255,255,255,0.1)' : 'rgba(15,23,42,0.8)',
+                              }}
+                            >
+                              {q.badge}
+                            </span>
+                            <p className={`text-xs font-bold leading-snug ${isSelected ? 'text-white' : 'text-slate-300'}`}>
+                              {q.headline}
+                            </p>
+                          </div>
+                          {isSelected && (
+                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
-              </div>
+                </div>
 
-              {/* Shop URL */}
-              <div className="bg-slate-950/80 rounded-xl px-3 py-2 border border-slate-800 flex items-center justify-between gap-2">
-                <span className="text-xs font-mono text-blue-400 truncate">
-                  {window.location.origin}/s/{shop?.slug}
-                </span>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/s/${shop?.slug}`);
-                    alert('Shop Link copied to clipboard!');
-                  }}
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition shrink-0"
-                  title="Copy"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                </button>
-              </div>
+                {/* 2. Paper Size for PDF */}
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                    2. PDF Print Size:
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { id: 'A4', label: 'A4 Poster (Standard Counter Wall / Standee)' },
+                      { id: 'A5', label: 'A5 Standee (Compact Tabletop)' },
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setPosterPaperSize(p.id as 'A4' | 'A5')}
+                        className={`py-2 px-3 rounded-xl text-xs font-bold border transition text-center ${
+                          posterPaperSize === p.id
+                            ? 'bg-blue-600 text-white border-blue-500 shadow-xs'
+                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-              {/* Actions */}
-              <div className="space-y-2 pt-1">
-                <Link
-                  to="/dashboard/standee"
-                  className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 shadow-md transition"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Customize & Print A4 Standee</span>
-                </Link>
-
-                <div className="grid grid-cols-2 gap-2">
+                {/* 3. Download Buttons */}
+                <div className="space-y-2 pt-2 border-t border-slate-800">
                   <button
-                    onClick={() => {
-                      if (!dashboardQrUrl) return;
-                      const a = document.createElement('a');
-                      a.href = dashboardQrUrl;
-                      a.download = `PrintCart_QR_${shop?.slug || 'shop'}.png`;
-                      a.click();
-                    }}
-                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition border border-slate-700"
+                    disabled={downloadingFormat !== 'none' || isGeneratingPoster}
+                    onClick={handleDownloadPosterPng}
+                    className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 hover:opacity-95 disabled:opacity-50 text-white font-extrabold text-sm rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 transition"
                   >
-                    <Download className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Download PNG</span>
+                    {downloadingFormat === 'png' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Generating High-Res PNG...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        <span>Download High-Res Poster (PNG)</span>
+                      </>
+                    )}
                   </button>
 
-                  <a
-                    href={`/s/${shop?.slug}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition border border-slate-700"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Open Customer</span>
-                  </a>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      disabled={downloadingFormat !== 'none' || isGeneratingPoster}
+                      onClick={handleDownloadPosterPdf}
+                      className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition border border-slate-700"
+                    >
+                      {downloadingFormat === 'pdf' ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                      ) : (
+                        <Printer className="w-3.5 h-3.5 text-blue-400" />
+                      )}
+                      <span>Download {posterPaperSize} PDF</span>
+                    </button>
+
+                    <Link
+                      to="/dashboard/standee"
+                      onClick={() => setShowQrModal(false)}
+                      className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition border border-slate-700"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Full Studio ↗</span>
+                    </Link>
+                  </div>
                 </div>
               </div>
             </div>
