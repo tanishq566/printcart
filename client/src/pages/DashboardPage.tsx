@@ -694,6 +694,30 @@ export const DashboardPage: React.FC = () => {
     return () => clearInterval(timer);
   }, [reprintUndo]);
 
+  const handleDownloadDocument = () => {
+    if (!previewBlobUrl || !selectedJob) return;
+    const a = document.createElement('a');
+    a.href = previewBlobUrl;
+
+    const ext = previewMime === 'application/pdf'
+      ? '.pdf'
+      : previewMime === 'image/png'
+      ? '.png'
+      : '.jpg';
+
+    let baseName = selectedJob.fileName || (selectedJob.jobType === 'ID_CARD' ? 'ID_Card_Merged.pdf' : 'document');
+    if (!baseName.toLowerCase().endsWith(ext)) {
+      baseName += ext;
+    }
+    const tokenPrefix = `Token_${selectedJob.tokenNumber}_`;
+    const finalDownloadName = baseName.startsWith('Token_') ? baseName : `${tokenPrefix}${baseName}`;
+
+    a.download = finalDownloadName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const handleApprovePrint = async () => {
     if (!selectedJobId || !previewBlobUrl) return;
     try {
@@ -1028,6 +1052,7 @@ export const DashboardPage: React.FC = () => {
                     <span className="text-xs font-mono text-slate-400 w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
                     <button onClick={() => setZoomLevel((z) => Math.min(2.5, z + 0.2))} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg" title="Zoom In"><ZoomIn className="w-4 h-4" /></button>
                     <button onClick={() => setRotation((r) => (r + 90) % 360)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg ml-1" title="Rotate 90°"><RotateCw className="w-4 h-4" /></button>
+                    <button onClick={handleDownloadDocument} disabled={!previewBlobUrl} className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg ml-1 disabled:opacity-30 transition" title="Download Document (Save to PC)"><Download className="w-4 h-4" /></button>
                   </div>
                 </div>
 
@@ -1085,6 +1110,16 @@ export const DashboardPage: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={!previewBlobUrl}
+                      onClick={handleDownloadDocument}
+                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 hover:text-white text-slate-200 border border-slate-700 font-bold rounded-xl text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-40"
+                      title="Save copy of this customer document to computer"
+                    >
+                      <Download className="w-4 h-4 text-emerald-400" />
+                      <span>Download</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => completeAndWipe(selectedJob.id, previewBlobUrl || '')}
