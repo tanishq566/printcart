@@ -178,14 +178,26 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
     },
   }[lang];
 
-  // Observe stage dimensions cleanly
+  // Lock background page scrolling & overscroll while modal is open on mobile
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    const prevOverscroll = document.documentElement.style.overscrollBehavior;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overscrollBehavior = 'none';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.documentElement.style.overscrollBehavior = prevOverscroll;
+    };
+  }, []);
+
+  // Observe stage dimensions cleanly (leave padding so corner handles don't clip at mobile screen edges)
   useEffect(() => {
     const el = stageContainerRef.current;
     if (!el) return;
     const updateSize = () => {
       const rect = el.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        setStageSize({ w: rect.width - 16, h: rect.height - 16 });
+        setStageSize({ w: Math.max(180, rect.width - 28), h: Math.max(180, rect.height - 28) });
       }
     };
     updateSize();
@@ -353,11 +365,18 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
     };
   };
 
-  // Pointer Move Handler
-  const handlePointerMove = (e: React.PointerEvent) => {
+  const safeSetCapture = (e: React.PointerEvent) => {
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // Some mobile WebViews don't support setPointerCapture reliably; window listeners handle it
+    }
+  };
+
+  // Global Pointer Move / Up listeners so fast mobile finger drags outside handle never drop
+  const applyDragMove = useCallback((clientX: number, clientY: number) => {
     if (!dragTarget) return;
-    e.preventDefault();
-    const pt = getNormalizedPoint(e.clientX, e.clientY);
+    const pt = getNormalizedPoint(clientX, clientY);
 
     if (dragTarget.type === 'quad-corner') {
       const c = dragTarget.corner;
@@ -477,11 +496,35 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
         h: clamp(newH, minSize, 1),
       });
     }
-  };
+  }, [dragTarget, aspectPreset, imgDims]);
 
-  const handlePointerUp = () => {
+  const handlePointerUp = useCallback(() => {
     setDragTarget(null);
     setActiveDragPoint(null);
+  }, []);
+
+  useEffect(() => {
+    if (!dragTarget) return;
+    const onMove = (ev: PointerEvent) => {
+      ev.preventDefault();
+      applyDragMove(ev.clientX, ev.clientY);
+    };
+    const onUp = () => handlePointerUp();
+
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [dragTarget, applyDragMove, handlePointerUp]);
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!dragTarget) return;
+    e.preventDefault();
+    applyDragMove(e.clientX, e.clientY);
   };
 
   // Rotate 90deg clockwise
@@ -582,7 +625,7 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
   const loupeOnRight = activeDragPoint && activeDragPoint.x < 0.35 && activeDragPoint.y < 0.35;
 
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-950 text-white flex flex-col overflow-hidden select-none">
+    <div className="fixed inset-0 h-[100dvh] z-[70] bg-slate-950 text-white flex flex-col overflow-hidden select-none overscroll-none touch-none">
       {/* Top Header */}
       <header className="h-14 px-3 sm:px-5 border-b border-slate-800/90 bg-slate-900/95 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -696,7 +739,7 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
       {/* Main Stage (Centered Interactive Canvas) */}
       <div
         ref={stageContainerRef}
-        className="flex-1 min-h-0 relative flex items-center justify-center p-2 bg-slate-950 overflow-hidden"
+        className="flex-1 min-h-0 relative flex items-center justify-center p-3 bg-slate-950 overflow-hidden touch-none overscroll-none"
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
@@ -786,13 +829,13 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
                     key={item.edge}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      safeSetCapture(e);
                       const pt = getNormalizedPoint(e.clientX, e.clientY);
                       setDragTarget({ type: 'quad-edge', edge: item.edge, startQuad: quad, startPt: pt });
                       setActiveDragPoint({ x: item.x, y: item.y });
                     }}
                     style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%` }}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center cursor-grab active:cursor-grabbing z-20 touch-none"
+                    className="absolute -translate-x-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center cursor-grab active:cursor-grabbing z-20 touch-none"
                   >
                     <div
                       className={`bg-white border-2 border-sky-500 rounded-full shadow-md ${
@@ -811,16 +854,16 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
                       key={c}
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                        safeSetCapture(e);
                         setDragTarget({ type: 'quad-corner', corner: c });
                         setActiveDragPoint(pt);
                       }}
                       style={{ left: `${pt.x * 100}%`, top: `${pt.y * 100}%` }}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center cursor-grab active:cursor-grabbing z-30 touch-none"
+                      className="absolute -translate-x-1/2 -translate-y-1/2 w-14 h-14 flex items-center justify-center cursor-grab active:cursor-grabbing z-30 touch-none"
                     >
                       <div
-                        className={`rounded-full border-3 border-white shadow-lg transition-transform ${
-                          isActive ? 'w-7 h-7 bg-emerald-400 scale-115' : 'w-5 h-5 bg-sky-500'
+                        className={`rounded-full border-[3px] border-white shadow-lg transition-transform ${
+                          isActive ? 'w-7 h-7 bg-emerald-400 scale-115' : 'w-6 h-6 bg-sky-500'
                         }`}
                       />
                     </div>
@@ -863,7 +906,7 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
                 <div
                   onPointerDown={(e) => {
                     e.stopPropagation();
-                    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                    safeSetCapture(e);
                     const pt = getNormalizedPoint(e.clientX, e.clientY);
                     setDragTarget({ type: 'box-move', startBox: box, startPt: pt });
                   }}
@@ -887,11 +930,11 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
                     key={edge.handle}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      safeSetCapture(e);
                       setDragTarget({ type: 'box-handle', handle: edge.handle, startBox: box });
                     }}
                     style={{ left: `${edge.x * 100}%`, top: `${edge.y * 100}%` }}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center z-20 touch-none cursor-pointer"
+                    className="absolute -translate-x-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center z-20 touch-none cursor-pointer"
                   >
                     <div
                       className={`bg-white border border-slate-900 rounded-full shadow-md ${
@@ -912,13 +955,13 @@ export const DocumentEditorModal: React.FC<DocumentEditorModalProps> = ({
                     key={corner.handle}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                      safeSetCapture(e);
                       setDragTarget({ type: 'box-handle', handle: corner.handle, startBox: box });
                     }}
                     style={{ left: `${corner.x * 100}%`, top: `${corner.y * 100}%` }}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center z-30 touch-none cursor-pointer"
+                    className="absolute -translate-x-1/2 -translate-y-1/2 w-14 h-14 flex items-center justify-center z-30 touch-none cursor-pointer"
                   >
-                    <div className="w-5 h-5 rounded-full bg-white border-3 border-sky-500 shadow-lg" />
+                    <div className="w-6 h-6 rounded-full bg-white border-[3px] border-sky-500 shadow-lg" />
                   </div>
                 ))}
               </>

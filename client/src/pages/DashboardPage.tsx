@@ -11,6 +11,8 @@ import {
   downloadPosterPdf,
 } from '../lib/posterGenerator';
 import { printDocumentViaFrame } from '../lib/printHelper';
+import { DocumentEditorModal } from '../components/DocumentEditorModal';
+import type { EditorState } from '../lib/imageProcessor';
 import {
   Printer,
   ShieldCheck,
@@ -44,6 +46,7 @@ import {
   Power,
   AlertCircle,
   Maximize2,
+  Crop,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
@@ -508,6 +511,16 @@ export const DashboardPage: React.FC = () => {
 
   const [isPrintingAction, setIsPrintingAction] = useState(false);
 
+  // Shopowner In-Counter Document Editor State
+  const origPreviewFileRef = useRef<{ jobId: string; file: File } | null>(null);
+  const [shopEditorState, setShopEditorState] = useState<EditorState | undefined>(undefined);
+  const [shopEditorSession, setShopEditorSession] = useState<{
+    file: File;
+    mode: 'normal' | 'id_card';
+    initialState?: Partial<EditorState>;
+  } | null>(null);
+  const [isPreparingEdit, setIsPreparingEdit] = useState(false);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfDocRef = useRef<any>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -624,12 +637,18 @@ export const DashboardPage: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!selectedJobId) { setPreviewBlobUrl(null); setPreviewMime(null); return; }
+    if (!selectedJobId) {
+      setPreviewBlobUrl(null);
+      setPreviewMime(null);
+      setShopEditorState(undefined);
+      return;
+    }
     let active = true;
     setLoadingPreview(true);
     setPdfPage(1);
     setRotation(0);
     setZoomLevel(1);
+    setShopEditorState(undefined);
 
     apiFetch<{ previewUrl: string; mimeType: string; fileName: string; pageCount: number }>(
       `/jobs/${selectedJobId}/preview-url`
@@ -723,6 +742,76 @@ export const DashboardPage: React.FC = () => {
     document.body.removeChild(a);
   };
 
+  const handleOpenShopEditor = async () => {
+    if (!selectedJob || !previewBlobUrl || isPreparingEdit) return;
+    try {
+      setIsPreparingEdit(true);
+      let sourceFile: File;
+
+      if (origPreviewFileRef.current?.jobId === selectedJob.id && !shopEditorState && previewMime === 'application/pdf') {
+        sourceFile = origPreviewFileRef.current.file;
+      } else if (origPreviewFileRef.current?.jobId === selectedJob.id && previewMime !== 'application/pdf') {
+        sourceFile = origPreviewFileRef.current.file;
+      } else if (previewMime === 'application/pdf' && pdfDocRef.current) {
+        // Render active PDF page at crisp high resolution (~2.6x) so shopkeeper can crop & clean it too
+        const page = await pdfDocRef.current.getPage(pdfPage);
+        const viewport = page.getViewport({ scale: 2.6, rotation: 0 });
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = viewport.width;
+        tmpCanvas.height = viewport.height;
+        const ctx = tmpCanvas.getContext('2d')!;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, tmpCanvas.width, tmpCanvas.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        const jpgBlob = await new Promise<Blob>((resolve, reject) => {
+          tmpCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Canvas encode failed'))), 'image/jpeg', 0.94);
+        });
+        const cleanBase = (selectedJob.fileName || 'document').replace(/\.[^.]+$/, '');
+        sourceFile = new File([jpgBlob], `${cleanBase}_p${pdfPage}.jpg`, { type: 'image/jpeg' });
+        origPreviewFileRef.current = { jobId: selectedJob.id, file: sourceFile };
+      } else {
+        const blob = await fetch(previewBlobUrl).then((r) => r.blob());
+        const fileName = selectedJob.fileName || 'customer_document.jpg';
+        sourceFile = new File([blob], fileName, { type: blob.type || previewMime || 'image/jpeg' });
+        origPreviewFileRef.current = { jobId: selectedJob.id, file: sourceFile };
+      }
+
+      const rotTurns = Math.round((((rotation % 360) + 360) % 360) / 90) % 4;
+      const initial = shopEditorState
+        ? shopEditorState
+        : rotTurns !== 0
+        ? { rotation90: rotTurns, cropMode: 'box' as const, preset: 'original' as const }
+        : { preset: 'original' as const };
+
+      setShopEditorSession({
+        file: sourceFile,
+        mode: selectedJob.jobType === 'ID_CARD' ? 'id_card' : 'normal',
+        initialState: initial,
+      });
+    } catch (err) {
+      console.error('Shop editor open error:', err);
+      alert('Could not open editor for this document.');
+    } finally {
+      setIsPreparingEdit(false);
+    }
+  };
+
+  const handleShopEditorApply = (result: {
+    file: File;
+    dataUrl: string;
+    editorState: EditorState;
+  }) => {
+    const newBlobUrl = URL.createObjectURL(result.file);
+    pdfDocRef.current = null;
+    setPreviewBlobUrl(newBlobUrl);
+    setPreviewMime('image/jpeg');
+    setRotation(0);
+    setZoomLevel(1);
+    setShopEditorState(result.editorState);
+    setShopEditorSession(null);
+  };
+
   const handleApprovePrint = async () => {
     if (!selectedJobId || !previewBlobUrl) return;
     try {
@@ -808,6 +897,7 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (shopEditorSession || showQrModal || showRejectMenu) return;
       const activeTag = (document.activeElement?.tagName || '').toLowerCase();
       if (activeTag === 'input' || activeTag === 'textarea') return;
       const filtered = getFilteredJobs();
@@ -819,7 +909,7 @@ export const DashboardPage: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [jobs, selectedJobId, queueFilter, previewBlobUrl, isPrintingAction]);
+  }, [jobs, selectedJobId, queueFilter, previewBlobUrl, isPrintingAction, shopEditorSession, showQrModal, showRejectMenu]);
 
   const selectedJob = jobs.find((j) => j.id === selectedJobId);
 
@@ -1096,7 +1186,7 @@ export const DashboardPage: React.FC = () => {
                 </div>
 
                 {/* Action bar */}
-                <div className="h-16 bg-slate-950 border-t border-slate-800 px-6 flex items-center justify-between shrink-0 relative">
+                <div className="min-h-16 py-2.5 bg-slate-950 border-t border-slate-800 px-4 sm:px-6 flex flex-wrap items-center justify-between gap-2 shrink-0 relative">
                   <div className="relative">
                     <button
                       type="button"
@@ -1127,7 +1217,21 @@ export const DashboardPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <button
+                      type="button"
+                      disabled={!previewBlobUrl || isPreparingEdit}
+                      onClick={handleOpenShopEditor}
+                      className="px-4 py-2.5 bg-sky-950/90 hover:bg-sky-900 hover:text-white text-sky-300 border border-sky-700/80 font-bold rounded-xl text-sm transition flex items-center gap-2 shadow-sm disabled:opacity-40"
+                      title="Crop, straighten, remove shadows & enhance document before printing"
+                    >
+                      {isPreparingEdit ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                      ) : (
+                        <Crop className="w-4 h-4 text-sky-400" />
+                      )}
+                      <span>{shopEditorState ? 'Edit Again ✓' : 'Edit / Crop'}</span>
+                    </button>
                     <button
                       type="button"
                       disabled={!previewBlobUrl}
@@ -1354,6 +1458,17 @@ export const DashboardPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {/* In-Counter Shopkeeper Document Editor Modal */}
+      {shopEditorSession && (
+        <DocumentEditorModal
+          file={shopEditorSession.file}
+          mode={shopEditorSession.mode}
+          lang="en"
+          initialState={shopEditorSession.initialState}
+          onCancel={() => setShopEditorSession(null)}
+          onApply={handleShopEditorApply}
+        />
       )}
     </div>
   );

@@ -105,10 +105,6 @@ export const ShopUploadPage: React.FC = () => {
     isReEdit: boolean;
   } | null>(null);
 
-  const normalInputRef = useRef<HTMLInputElement | null>(null);
-  const frontInputRef = useRef<HTMLInputElement | null>(null);
-  const backInputRef = useRef<HTMLInputElement | null>(null);
-
   // --- Uploading & Live Tracking State ---
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
@@ -922,16 +918,16 @@ export const ShopUploadPage: React.FC = () => {
             {/* Upload Drag/Tap Box */}
             <div>
               <input
-                ref={normalInputRef}
+                id="normal-print-file"
                 type="file"
-                accept=".pdf,image/jpeg,image/png,image/jpg,image/webp"
+                accept="application/pdf,image/*"
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
                     handleFileChange(e.target.files[0]);
                     e.target.value = '';
                   }
                 }}
-                className="hidden"
+                className="sr-only"
               />
 
               {selectedFile ? (
@@ -981,21 +977,19 @@ export const ShopUploadPage: React.FC = () => {
                         <span>{t.cropEnhance}</span>
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => normalInputRef.current?.click()}
-                      className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                    <label
+                      htmlFor="normal-print-file"
+                      className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
                       <span>{t.replaceFile}</span>
-                    </button>
+                    </label>
                   </div>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => normalInputRef.current?.click()}
-                  className="w-full border-2 border-dashed border-slate-300 hover:border-blue-400 bg-white rounded-3xl p-6 text-center transition block"
+                <label
+                  htmlFor="normal-print-file"
+                  className="w-full border-2 border-dashed border-slate-300 hover:border-blue-400 bg-white rounded-3xl p-6 text-center transition block cursor-pointer"
                 >
                   <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3">
                     <UploadCloud className="w-6 h-6" />
@@ -1004,7 +998,7 @@ export const ShopUploadPage: React.FC = () => {
                     <p className="text-sm font-bold text-slate-900">{t.uploadLabel}</p>
                     <p className="text-xs text-slate-500">{t.uploadSub}</p>
                   </div>
-                </button>
+                </label>
               )}
             </div>
 
@@ -1134,7 +1128,7 @@ export const ShopUploadPage: React.FC = () => {
               {/* Front Box */}
               <div className="space-y-1.5">
                 <input
-                  ref={frontInputRef}
+                  id="id-front-file"
                   type="file"
                   accept="image/*"
                   onChange={(e) => {
@@ -1143,10 +1137,10 @@ export const ShopUploadPage: React.FC = () => {
                       e.target.value = '';
                     }
                   }}
-                  className="hidden"
+                  className="sr-only"
                 />
-                <div
-                  onClick={() => frontInputRef.current?.click()}
+                <label
+                  htmlFor="id-front-file"
                   className={`border-2 border-dashed rounded-2xl p-2 text-center aspect-[4/3] flex flex-col items-center justify-center transition overflow-hidden cursor-pointer ${
                     frontPreview
                       ? 'border-teal-500 bg-white'
@@ -1166,7 +1160,7 @@ export const ShopUploadPage: React.FC = () => {
                       <span className="text-[10px] text-slate-400">{t.tapToCapture}</span>
                     </>
                   )}
-                </div>
+                </label>
                 {frontPreview && frontRawFile && (
                   <div className="flex gap-1.5">
                     <button
@@ -1185,14 +1179,13 @@ export const ShopUploadPage: React.FC = () => {
                       <Crop className="w-3 h-3" />
                       <span>{t.cropEnhance}</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => frontInputRef.current?.click()}
-                      className="py-1.5 px-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold flex items-center justify-center transition"
+                    <label
+                      htmlFor="id-front-file"
+                      className="py-1.5 px-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold flex items-center justify-center transition cursor-pointer"
                       title={t.replaceFile}
                     >
                       <RefreshCw className="w-3 h-3" />
-                    </button>
+                    </label>
                   </div>
                 )}
               </div>
@@ -1200,7 +1193,7 @@ export const ShopUploadPage: React.FC = () => {
               {/* Back Box */}
               <div className="space-y-1.5">
                 <input
-                  ref={backInputRef}
+                  id="id-back-file"
                   type="file"
                   accept="image/*"
                   onChange={(e) => {
@@ -1209,10 +1202,10 @@ export const ShopUploadPage: React.FC = () => {
                       e.target.value = '';
                     }
                   }}
-                  className="hidden"
+                  className="sr-only"
                 />
-                <div
-                  onClick={() => backInputRef.current?.click()}
+                <label
+                  htmlFor="id-back-file"
                   className={`border-2 border-dashed rounded-2xl p-2 text-center aspect-[4/3] flex flex-col items-center justify-center transition overflow-hidden cursor-pointer ${
                     backPreview
                       ? 'border-teal-500 bg-white'
@@ -1232,7 +1225,7 @@ export const ShopUploadPage: React.FC = () => {
                       <span className="text-[10px] text-slate-400">{t.tapToCapture}</span>
                     </>
                   )}
-                </div>
+                </label>
                 {backPreview && backRawFile && (
                   <div className="flex gap-1.5">
                     <button
@@ -1251,14 +1244,13 @@ export const ShopUploadPage: React.FC = () => {
                       <Crop className="w-3 h-3" />
                       <span>{t.cropEnhance}</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => backInputRef.current?.click()}
-                      className="py-1.5 px-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold flex items-center justify-center transition"
+                    <label
+                      htmlFor="id-back-file"
+                      className="py-1.5 px-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold flex items-center justify-center transition cursor-pointer"
                       title={t.replaceFile}
                     >
                       <RefreshCw className="w-3 h-3" />
-                    </button>
+                    </label>
                   </div>
                 )}
               </div>

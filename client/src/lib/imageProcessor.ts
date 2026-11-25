@@ -64,9 +64,35 @@ export function clamp(val: number, min: number, max: number): number {
 
 /**
  * Loads a File into a print-optimal normalized Canvas (auto-handles browser EXIF rotation
- * and caps max dimension to protect mobile browser memory).
+ * via createImageBitmap when available and caps max dimension to protect mobile RAM).
  */
 export async function loadFileToCanvas(file: File, maxDim = 2200): Promise<HTMLCanvasElement> {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bmp = await createImageBitmap(file);
+      try {
+        const srcW = bmp.width;
+        const srcH = bmp.height;
+        const scale = Math.min(1, maxDim / Math.max(srcW, srcH));
+        const w = Math.max(1, Math.round(srcW * scale));
+        const h = Math.max(1, Math.round(srcH * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(bmp, 0, 0, w, h);
+        return canvas;
+      } finally {
+        bmp.close();
+      }
+    } catch {
+      // Fallback safely to Image element decoder
+    }
+  }
+
   const objectUrl = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
