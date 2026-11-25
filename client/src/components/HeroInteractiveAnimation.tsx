@@ -362,16 +362,17 @@ export const HeroInteractiveAnimation: React.FC = () => {
         <div
           className="absolute z-40 pointer-events-none"
           style={{
-            left: '46%',
-            bottom: '8%',
+            right: '3%',
+            bottom: '7%',
+            maxWidth: '94%',
             animation: 'printSuccessToast 8s cubic-bezier(0.16, 1, 0.3, 1) infinite',
             willChange: 'transform, opacity',
           }}
         >
-          <div className="bg-slate-950/95 backdrop-blur-md text-white text-[12px] font-bold px-4 py-2 rounded-full shadow-2xl border border-emerald-400/90 flex items-center gap-2 whitespace-nowrap">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-emerald-400">Token #14 Paper Printed ✓</span>
-            <span className="text-slate-400 text-[11px]">| Server Auto-Deleted</span>
+          <div className="bg-slate-950/95 backdrop-blur-md text-white text-[10px] sm:text-[11px] font-bold px-3 sm:px-3.5 py-1.5 rounded-full shadow-2xl border border-emerald-400/90 flex items-center gap-1.5 whitespace-nowrap">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+            <span className="text-emerald-400">Token #14 Printed ✓</span>
+            <span className="text-slate-400 text-[10px]">| Auto-Deleted</span>
           </div>
         </div>
       </div>
