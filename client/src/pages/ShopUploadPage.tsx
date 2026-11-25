@@ -22,9 +22,12 @@ import {
   ChevronRight,
   RefreshCw,
   ExternalLink,
+  Crop,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { Shop } from '../types';
+import { DocumentEditorModal } from '../components/DocumentEditorModal';
+import { EditorState, loadFileToCanvas, exportCanvasToFile } from '../lib/imageProcessor';
 
 interface JobInitResponse {
   jobId: string;
@@ -72,6 +75,9 @@ export const ShopUploadPage: React.FC = () => {
 
   // --- Normal Print State ---
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [normalRawFile, setNormalRawFile] = useState<File | null>(null);
+  const [normalPreviewUrl, setNormalPreviewUrl] = useState<string | null>(null);
+  const [normalEditorState, setNormalEditorState] = useState<EditorState | undefined>(undefined);
   const [pageCount, setPageCount] = useState<number>(1);
   const [colorMode, setColorMode] = useState<'BW' | 'COLOR'>('BW');
   const [copies, setCopies] = useState<number>(1);
@@ -80,11 +86,28 @@ export const ShopUploadPage: React.FC = () => {
 
   // --- ID Card State ---
   const [frontImage, setFrontImage] = useState<File | null>(null);
+  const [frontRawFile, setFrontRawFile] = useState<File | null>(null);
   const [frontPreview, setFrontPreview] = useState<string | null>(null);
+  const [frontEditorState, setFrontEditorState] = useState<EditorState | undefined>(undefined);
   const [backImage, setBackImage] = useState<File | null>(null);
+  const [backRawFile, setBackRawFile] = useState<File | null>(null);
   const [backPreview, setBackPreview] = useState<string | null>(null);
+  const [backEditorState, setBackEditorState] = useState<EditorState | undefined>(undefined);
   const [autoBrighten, setAutoBrighten] = useState<boolean>(true);
   const [idCopies, setIdCopies] = useState<number>(1);
+
+  // --- In-Browser Document / Image Editor Modal State ---
+  const [editorSession, setEditorSession] = useState<{
+    target: 'normal' | 'front' | 'back';
+    file: File;
+    mode: 'normal' | 'id_card';
+    initialState?: Partial<EditorState>;
+    isReEdit: boolean;
+  } | null>(null);
+
+  const normalInputRef = useRef<HTMLInputElement | null>(null);
+  const frontInputRef = useRef<HTMLInputElement | null>(null);
+  const backInputRef = useRef<HTMLInputElement | null>(null);
 
   // --- Uploading & Live Tracking State ---
   const [isUploading, setIsUploading] = useState<boolean>(false);
@@ -131,6 +154,10 @@ export const ShopUploadPage: React.FC = () => {
       uploadAgain: 'Upload Again',
       payUpi: 'Pay via UPI App',
       uploadAnother: 'Print Another Document',
+      cropEnhance: 'Crop & Enhance',
+      replaceFile: 'Change File',
+      editedReady: 'Cropped & Enhanced ✓',
+      rawReady: 'Ready for Print',
     },
     hi: {
       privacyPill: '🔒 100% प्राइवेट • प्रिंट होते ही सर्वर से तुरंत डिलीट',
@@ -169,6 +196,10 @@ export const ShopUploadPage: React.FC = () => {
       uploadAgain: 'दोबारा अपलोड करें',
       payUpi: 'UPI से पेमेंट करें (PhonePe / GPay)',
       uploadAnother: 'कोई और फाइल प्रिंट करें',
+      cropEnhance: 'क्रॉप और साफ करें',
+      replaceFile: 'फाइल बदलें',
+      editedReady: 'क्रॉप और साफ हो गई ✓',
+      rawReady: 'प्रिंट के लिए तैयार',
     },
   }[lang];
 
@@ -215,9 +246,26 @@ export const ShopUploadPage: React.FC = () => {
     };
   }, [activeJob?.id]);
 
-  // Detect PDF Page Count
+  const isImageFile = (file: File) =>
+    file.type.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(file.name);
+
+  // Detect PDF Page Count OR launch Document Editor for images
   const handleFileChange = async (file: File) => {
+    if (isImageFile(file)) {
+      setNormalRawFile(file);
+      setEditorSession({
+        target: 'normal',
+        file,
+        mode: 'normal',
+        isReEdit: false,
+      });
+      return;
+    }
+
     setSelectedFile(file);
+    setNormalRawFile(null);
+    setNormalPreviewUrl(null);
+    setNormalEditorState(undefined);
     if (file.type === 'application/pdf') {
       try {
         const buffer = await file.arrayBuffer();
@@ -232,7 +280,7 @@ export const ShopUploadPage: React.FC = () => {
     }
   };
 
-  // Preprocess Image (Auto-Brighten & Contrast)
+  // Preprocess Image (Auto-Brighten & Contrast fallback when editor skipped)
   const processImageToDataUrl = async (file: File, brighten: boolean): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -255,18 +303,83 @@ export const ShopUploadPage: React.FC = () => {
     });
   };
 
-  // Handle ID Card Front Image
+  // Handle ID Card Front Image -> Opens Document Editor
   const handleFrontImage = async (file: File) => {
-    setFrontImage(file);
-    const dataUrl = await processImageToDataUrl(file, autoBrighten);
-    setFrontPreview(dataUrl);
+    setFrontRawFile(file);
+    setEditorSession({
+      target: 'front',
+      file,
+      mode: 'id_card',
+      isReEdit: false,
+    });
   };
 
-  // Handle ID Card Back Image
+  // Handle ID Card Back Image -> Opens Document Editor
   const handleBackImage = async (file: File) => {
-    setBackImage(file);
-    const dataUrl = await processImageToDataUrl(file, autoBrighten);
-    setBackPreview(dataUrl);
+    setBackRawFile(file);
+    setEditorSession({
+      target: 'back',
+      file,
+      mode: 'id_card',
+      isReEdit: false,
+    });
+  };
+
+  const handleEditorApply = (result: { file: File; dataUrl: string; editorState: EditorState }) => {
+    if (!editorSession) return;
+    if (editorSession.target === 'normal') {
+      setSelectedFile(result.file);
+      setNormalPreviewUrl(result.dataUrl);
+      setNormalEditorState(result.editorState);
+      setPageCount(1);
+    } else if (editorSession.target === 'front') {
+      setFrontImage(result.file);
+      setFrontPreview(result.dataUrl);
+      setFrontEditorState(result.editorState);
+    } else if (editorSession.target === 'back') {
+      setBackImage(result.file);
+      setBackPreview(result.dataUrl);
+      setBackEditorState(result.editorState);
+    }
+    setEditorSession(null);
+  };
+
+  const handleEditorSkip = async () => {
+    if (!editorSession) return;
+    const raw = editorSession.file;
+    try {
+      const needsJpegConvert = raw.type === 'image/webp' || raw.size > 14 * 1024 * 1024;
+      if (editorSession.target === 'normal') {
+        const canvas = await loadFileToCanvas(raw, needsJpegConvert ? 2200 : 1200);
+        if (needsJpegConvert) {
+          const converted = await exportCanvasToFile(canvas, raw.name, 0.92);
+          setSelectedFile(converted.file);
+          setNormalPreviewUrl(converted.dataUrl);
+        } else {
+          setSelectedFile(raw);
+          setNormalPreviewUrl(canvas.toDataURL('image/jpeg', 0.85));
+        }
+        setNormalEditorState(undefined);
+        setPageCount(1);
+      } else if (editorSession.target === 'front') {
+        setFrontImage(raw);
+        setFrontEditorState(undefined);
+        const dataUrl = await processImageToDataUrl(raw, autoBrighten);
+        setFrontPreview(dataUrl);
+      } else if (editorSession.target === 'back') {
+        setBackImage(raw);
+        setBackEditorState(undefined);
+        const dataUrl = await processImageToDataUrl(raw, autoBrighten);
+        setBackPreview(dataUrl);
+      }
+    } catch {
+      if (editorSession.target === 'normal') {
+        setSelectedFile(raw);
+        setPageCount(1);
+      }
+    } finally {
+      setEditorSession(null);
+    }
   };
 
   // Calculate live estimate
@@ -361,9 +474,15 @@ export const ShopUploadPage: React.FC = () => {
       const page = pdfDoc.addPage([595.28, 841.89]);
       const { width, height } = page.getSize();
 
-      // Convert images to bytes
-      const frontDataUrl = await processImageToDataUrl(frontImage, autoBrighten);
-      const backDataUrl = await processImageToDataUrl(backImage, autoBrighten);
+      // Convert images to bytes (skip double-brighten if already enhanced via DocumentEditorModal)
+      const frontDataUrl =
+        frontEditorState && frontPreview
+          ? frontPreview
+          : await processImageToDataUrl(frontImage, autoBrighten);
+      const backDataUrl =
+        backEditorState && backPreview
+          ? backPreview
+          : await processImageToDataUrl(backImage, autoBrighten);
 
       const frontBytes = await fetch(frontDataUrl).then((r) => r.arrayBuffer());
       const backBytes = await fetch(backDataUrl).then((r) => r.arrayBuffer());
@@ -376,14 +495,32 @@ export const ShopUploadPage: React.FC = () => {
       const cardH = 202;
       const centerX = (width - cardW) / 2;
 
+      const drawFittedImage = (
+        imgObj: typeof frontPdfImg,
+        slotX: number,
+        slotY: number,
+        slotW: number,
+        slotH: number
+      ) => {
+        const imgRatio = imgObj.width / imgObj.height;
+        const slotRatio = slotW / slotH;
+        let drawW = slotW;
+        let drawH = slotH;
+        if (Math.abs(imgRatio - slotRatio) > 0.08) {
+          if (imgRatio > slotRatio) {
+            drawH = slotW / imgRatio;
+          } else {
+            drawW = slotH * imgRatio;
+          }
+        }
+        const dx = slotX + (slotW - drawW) / 2;
+        const dy = slotY + (slotH - drawH) / 2;
+        page.drawImage(imgObj, { x: dx, y: dy, width: drawW, height: drawH });
+      };
+
       // Position Front Card (Upper Center)
       const frontY = height - 120 - cardH;
-      page.drawImage(frontPdfImg, {
-        x: centerX,
-        y: frontY,
-        width: cardW,
-        height: cardH,
-      });
+      drawFittedImage(frontPdfImg, centerX, frontY, cardW, cardH);
 
       // Draw subtle cut guideline border around front
       page.drawRectangle({
@@ -397,12 +534,7 @@ export const ShopUploadPage: React.FC = () => {
 
       // Position Back Card (Lower Center with spacing)
       const backY = frontY - cardH - 50;
-      page.drawImage(backPdfImg, {
-        x: centerX,
-        y: backY,
-        width: cardW,
-        height: cardH,
-      });
+      drawFittedImage(backPdfImg, centerX, backY, cardW, cardH);
 
       // Draw subtle cut guideline border around back
       page.drawRectangle({
@@ -685,8 +817,17 @@ export const ShopUploadPage: React.FC = () => {
                 onClick={() => {
                   setActiveJob(null);
                   setSelectedFile(null);
+                  setNormalRawFile(null);
+                  setNormalPreviewUrl(null);
+                  setNormalEditorState(undefined);
                   setFrontImage(null);
+                  setFrontRawFile(null);
+                  setFrontPreview(null);
+                  setFrontEditorState(undefined);
                   setBackImage(null);
+                  setBackRawFile(null);
+                  setBackPreview(null);
+                  setBackEditorState(undefined);
                 }}
                 className="text-xs font-semibold text-slate-500 hover:text-blue-600 transition"
               >
@@ -779,44 +920,92 @@ export const ShopUploadPage: React.FC = () => {
         {activeTab === 'NORMAL' && (
           <div className="space-y-4">
             {/* Upload Drag/Tap Box */}
-            <div className="relative">
+            <div>
               <input
+                ref={normalInputRef}
                 type="file"
-                accept=".pdf,image/jpeg,image/png,image/jpg"
+                accept=".pdf,image/jpeg,image/png,image/jpg,image/webp"
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
                     handleFileChange(e.target.files[0]);
+                    e.target.value = '';
                   }
                 }}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                className="hidden"
               />
-              <div
-                className={`border-2 border-dashed rounded-3xl p-6 text-center transition ${
-                  selectedFile
-                    ? 'border-blue-500 bg-blue-50/40'
-                    : 'border-slate-300 hover:border-blue-400 bg-white'
-                }`}
-              >
-                <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3">
-                  <UploadCloud className="w-6 h-6" />
-                </div>
-                {selectedFile ? (
-                  <div className="space-y-1">
+
+              {selectedFile ? (
+                <div className="border-2 border-blue-500 bg-white rounded-3xl p-4 shadow-xs space-y-3">
+                  {normalPreviewUrl ? (
+                    <div className="relative bg-slate-100 rounded-2xl p-2 flex items-center justify-center border border-slate-200 overflow-hidden">
+                      <img
+                        src={normalPreviewUrl}
+                        alt="Document preview"
+                        className="max-h-52 w-auto object-contain rounded-xl shadow-xs"
+                      />
+                      <span className="absolute top-2.5 right-2.5 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-600 text-white shadow-sm">
+                        {normalEditorState ? t.editedReady : t.rawReady}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center mx-auto">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                  )}
+
+                  <div className="text-center space-y-0.5">
                     <p className="text-sm font-bold text-slate-900 truncate max-w-[280px] mx-auto">
                       {selectedFile.name}
                     </p>
                     <p className="text-xs font-semibold text-blue-700">
                       {(selectedFile.size / 1024 / 1024).toFixed(2)} MB • {pageCount} {t.pagesDetected}
                     </p>
-                    <p className="text-[11px] text-slate-400">Tap to replace document</p>
                   </div>
-                ) : (
+
+                  <div className={`grid ${normalRawFile ? 'grid-cols-2' : 'grid-cols-1'} gap-2 pt-1`}>
+                    {normalRawFile && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditorSession({
+                            target: 'normal',
+                            file: normalRawFile,
+                            mode: 'normal',
+                            initialState: normalEditorState,
+                            isReEdit: true,
+                          })
+                        }
+                        className="py-2.5 px-3 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                      >
+                        <Crop className="w-3.5 h-3.5" />
+                        <span>{t.cropEnhance}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => normalInputRef.current?.click()}
+                      className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>{t.replaceFile}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => normalInputRef.current?.click()}
+                  className="w-full border-2 border-dashed border-slate-300 hover:border-blue-400 bg-white rounded-3xl p-6 text-center transition block"
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3">
+                    <UploadCloud className="w-6 h-6" />
+                  </div>
                   <div className="space-y-1">
                     <p className="text-sm font-bold text-slate-900">{t.uploadLabel}</p>
                     <p className="text-xs text-slate-500">{t.uploadSub}</p>
                   </div>
-                )}
-              </div>
+                </button>
+              )}
             </div>
 
             {/* Print Options */}
@@ -943,30 +1132,32 @@ export const ShopUploadPage: React.FC = () => {
             {/* Two Photo Boxes: Front & Back */}
             <div className="grid grid-cols-2 gap-3">
               {/* Front Box */}
-              <div className="relative">
+              <div className="space-y-1.5">
                 <input
+                  ref={frontInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
                       handleFrontImage(e.target.files[0]);
+                      e.target.value = '';
                     }
                   }}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  className="hidden"
                 />
                 <div
-                  className={`border-2 border-dashed rounded-2xl p-4 text-center aspect-[4/3] flex flex-col items-center justify-center transition overflow-hidden ${
+                  onClick={() => frontInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-2 text-center aspect-[4/3] flex flex-col items-center justify-center transition overflow-hidden cursor-pointer ${
                     frontPreview
-                      ? 'border-teal-500 bg-teal-50/20'
-                      : 'border-slate-300 hover:border-teal-400 bg-white'
+                      ? 'border-teal-500 bg-white'
+                      : 'border-slate-300 hover:border-teal-400 bg-white p-4'
                   }`}
                 >
                   {frontPreview ? (
                     <img
                       src={frontPreview}
                       alt="Front Side"
-                      className="w-full h-full object-cover rounded-lg"
+                      className="w-full h-full object-contain rounded-lg"
                     />
                   ) : (
                     <>
@@ -976,33 +1167,63 @@ export const ShopUploadPage: React.FC = () => {
                     </>
                   )}
                 </div>
+                {frontPreview && frontRawFile && (
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditorSession({
+                          target: 'front',
+                          file: frontRawFile,
+                          mode: 'id_card',
+                          initialState: frontEditorState,
+                          isReEdit: true,
+                        })
+                      }
+                      className="flex-1 py-1.5 px-2 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-[11px] font-bold flex items-center justify-center gap-1 transition"
+                    >
+                      <Crop className="w-3 h-3" />
+                      <span>{t.cropEnhance}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => frontInputRef.current?.click()}
+                      className="py-1.5 px-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold flex items-center justify-center transition"
+                      title={t.replaceFile}
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Back Box */}
-              <div className="relative">
+              <div className="space-y-1.5">
                 <input
+                  ref={backInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
                       handleBackImage(e.target.files[0]);
+                      e.target.value = '';
                     }
                   }}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  className="hidden"
                 />
                 <div
-                  className={`border-2 border-dashed rounded-2xl p-4 text-center aspect-[4/3] flex flex-col items-center justify-center transition overflow-hidden ${
+                  onClick={() => backInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-2 text-center aspect-[4/3] flex flex-col items-center justify-center transition overflow-hidden cursor-pointer ${
                     backPreview
-                      ? 'border-teal-500 bg-teal-50/20'
-                      : 'border-slate-300 hover:border-teal-400 bg-white'
+                      ? 'border-teal-500 bg-white'
+                      : 'border-slate-300 hover:border-teal-400 bg-white p-4'
                   }`}
                 >
                   {backPreview ? (
                     <img
                       src={backPreview}
                       alt="Back Side"
-                      className="w-full h-full object-cover rounded-lg"
+                      className="w-full h-full object-contain rounded-lg"
                     />
                   ) : (
                     <>
@@ -1012,6 +1233,34 @@ export const ShopUploadPage: React.FC = () => {
                     </>
                   )}
                 </div>
+                {backPreview && backRawFile && (
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditorSession({
+                          target: 'back',
+                          file: backRawFile,
+                          mode: 'id_card',
+                          initialState: backEditorState,
+                          isReEdit: true,
+                        })
+                      }
+                      className="flex-1 py-1.5 px-2 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-[11px] font-bold flex items-center justify-center gap-1 transition"
+                    >
+                      <Crop className="w-3 h-3" />
+                      <span>{t.cropEnhance}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => backInputRef.current?.click()}
+                      className="py-1.5 px-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-bold flex items-center justify-center transition"
+                      title={t.replaceFile}
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1094,6 +1343,19 @@ export const ShopUploadPage: React.FC = () => {
           </button>
         </div>
       </footer>
+
+      {/* In-Browser Document / Image Editor Modal (Option 1 + Option 2) */}
+      {editorSession && (
+        <DocumentEditorModal
+          file={editorSession.file}
+          mode={editorSession.mode}
+          lang={lang}
+          initialState={editorSession.initialState}
+          onCancel={() => setEditorSession(null)}
+          onSkip={editorSession.isReEdit ? undefined : handleEditorSkip}
+          onApply={handleEditorApply}
+        />
+      )}
     </div>
   );
 };
