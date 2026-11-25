@@ -33,6 +33,7 @@ import { Shop } from '../types';
 import { DocumentEditorModal } from '../components/DocumentEditorModal';
 import { EditorState, loadFileToCanvas, exportCanvasToFile } from '../lib/imageProcessor';
 import { unlockVoiceAudio, notifyCustomerPrintApproved } from '../lib/voiceAlert';
+import { calcTieredPrintTotal, hasTieredExtraRate } from '../utils/pricing';
 
 interface JobInitResponse {
   jobId: string;
@@ -62,6 +63,7 @@ interface JobStatusData {
     id: string;
     shopName: string;
     upiId?: string | null;
+    customQrUrl?: string | null;
   };
 }
 
@@ -117,9 +119,11 @@ export const ShopUploadPage: React.FC = () => {
     jobId: string;
     tokenNumber: number;
     amount: number;
-    upiLink: string;
+    upiLink: string | null;
     upiQrDataUrl: string;
+    customQrUrl: string | null;
   } | null>(null);
+  const [showOriginalCustomQr, setShowOriginalCustomQr] = useState(false);
   const [confirmingUpi, setConfirmingUpi] = useState(false);
 
   // --- Uploading & Live Tracking State ---
@@ -427,15 +431,19 @@ export const ShopUploadPage: React.FC = () => {
     }
   };
 
-  // Calculate live estimate
+  // Calculate live estimate (tiered: 1st page + after-1st-page rate if set)
   const calculateTotal = (): number => {
     if (!shop) return 0;
     if (activeTab === 'ID_CARD') {
-      return (shop.idCardRate || 10) * idCopies;
+      return Math.round((shop.idCardRate || 10) * idCopies * 100) / 100;
     }
-    const rate = colorMode === 'COLOR' ? shop.colorRate : shop.bwRate;
-    return rate * pageCount * copies;
+    if (colorMode === 'COLOR') {
+      return calcTieredPrintTotal(pageCount * copies, shop.colorRate, shop.colorExtraRate);
+    }
+    return calcTieredPrintTotal(pageCount * copies, shop.bwRate, shop.bwExtraRate);
   };
+
+  const hasOnlineUpi = Boolean(shop?.upiId || shop?.customQrUrl);
 
   const confirmAndTrackJob = async (jobId: string, method: 'COUNTER' | 'UPI_PAID') => {
     await apiFetch(`/public/jobs/${jobId}/confirm`, {
@@ -447,7 +455,7 @@ export const ShopUploadPage: React.FC = () => {
   };
 
   const finalizeOrPromptPayment = async (initRes: JobInitResponse) => {
-    const wantsUpi = paymentChoice === 'UPI' && Boolean(shop?.upiId) && initRes.estimatedPrice > 0;
+    const wantsUpi = paymentChoice === 'UPI' && hasOnlineUpi && initRes.estimatedPrice > 0;
     if (!wantsUpi) {
       setUploadProgress('Notifying shopkeeper counter...');
       await confirmAndTrackJob(initRes.jobId, 'COUNTER');
@@ -455,16 +463,24 @@ export const ShopUploadPage: React.FC = () => {
     }
 
     // Hold job silently before notifying shopkeeper until user finishes UPI payment step
-    const upiLink = `upi://pay?pa=${encodeURIComponent(shop!.upiId!)}&pn=${encodeURIComponent(
-      shop!.shopName
-    )}&am=${initRes.estimatedPrice}&cu=INR&tn=${encodeURIComponent(`PrintCart Token ${initRes.tokenNumber}`)}`;
-    const upiQrDataUrl = await QRCode.toDataURL(upiLink, { width: 240, margin: 1 });
+    let upiLink: string | null = null;
+    let upiQrDataUrl = shop!.customQrUrl || '';
+
+    if (shop!.upiId) {
+      upiLink = `upi://pay?pa=${encodeURIComponent(shop!.upiId!)}&pn=${encodeURIComponent(
+        shop!.shopName
+      )}&am=${initRes.estimatedPrice}&cu=INR&tn=${encodeURIComponent(`PrintCart Token ${initRes.tokenNumber}`)}`;
+      upiQrDataUrl = await QRCode.toDataURL(upiLink, { width: 240, margin: 1 });
+    }
+
+    setShowOriginalCustomQr(!shop!.upiId && Boolean(shop!.customQrUrl));
     setPendingUpiConfirm({
       jobId: initRes.jobId,
       tokenNumber: initRes.tokenNumber,
       amount: initRes.estimatedPrice,
       upiLink,
       upiQrDataUrl,
+      customQrUrl: shop!.customQrUrl || null,
     });
   };
 
@@ -504,7 +520,7 @@ export const ShopUploadPage: React.FC = () => {
           colorMode,
           sides,
           customerName: customerName.trim() || 'Walk-in',
-          paymentMethod: paymentChoice === 'UPI' && shop.upiId ? 'UPI_PAID' : 'COUNTER',
+          paymentMethod: paymentChoice === 'UPI' && hasOnlineUpi ? 'UPI_PAID' : 'COUNTER',
         }),
       });
 
@@ -649,7 +665,7 @@ export const ShopUploadPage: React.FC = () => {
           colorMode: 'COLOR',
           sides: 'SINGLE',
           customerName: customerName.trim() || 'Walk-in ID Card',
-          paymentMethod: paymentChoice === 'UPI' && shop.upiId ? 'UPI_PAID' : 'COUNTER',
+          paymentMethod: paymentChoice === 'UPI' && hasOnlineUpi ? 'UPI_PAID' : 'COUNTER',
         }),
       });
 
@@ -1126,7 +1142,18 @@ export const ShopUploadPage: React.FC = () => {
                     }`}
                   >
                     <div className="text-xs">{t.bw}</div>
-                    <div className="text-sm font-black text-slate-900 mt-0.5">₹{shop.bwRate}/pg</div>
+                    <div className="text-sm font-black text-slate-900 mt-0.5">
+                      {hasTieredExtraRate(shop.bwRate, shop.bwExtraRate) ? (
+                        <>
+                          ₹{shop.bwRate} <span className="text-[11px] font-bold text-slate-500">1st</span>
+                          <span className="block text-[11px] font-bold text-blue-700">
+                            ₹{shop.bwExtraRate}/pg after
+                          </span>
+                        </>
+                      ) : (
+                        <>₹{shop.bwRate}/pg</>
+                      )}
+                    </div>
                   </button>
 
                   <button
@@ -1139,7 +1166,18 @@ export const ShopUploadPage: React.FC = () => {
                     }`}
                   >
                     <div className="text-xs">{t.color}</div>
-                    <div className="text-sm font-black text-amber-700 mt-0.5">₹{shop.colorRate}/pg</div>
+                    <div className="text-sm font-black text-amber-700 mt-0.5">
+                      {hasTieredExtraRate(shop.colorRate, shop.colorExtraRate) ? (
+                        <>
+                          ₹{shop.colorRate} <span className="text-[11px] font-bold text-slate-500">1st</span>
+                          <span className="block text-[11px] font-bold text-amber-800">
+                            ₹{shop.colorExtraRate}/pg after
+                          </span>
+                        </>
+                      ) : (
+                        <>₹{shop.colorRate}/pg</>
+                      )}
+                    </div>
                   </button>
                 </div>
               </div>
@@ -1409,12 +1447,12 @@ export const ShopUploadPage: React.FC = () => {
           <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
             {t.payOptionTitle}
           </span>
-          <div className={`grid ${shop.upiId ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
+          <div className={`grid ${hasOnlineUpi ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
             <button
               type="button"
               onClick={() => setPaymentChoice('COUNTER')}
               className={`p-3 rounded-2xl border text-left transition flex items-start gap-2.5 ${
-                paymentChoice === 'COUNTER' || !shop.upiId
+                paymentChoice === 'COUNTER' || !hasOnlineUpi
                   ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20'
                   : 'border-slate-200 hover:bg-slate-50'
               }`}
@@ -1432,7 +1470,7 @@ export const ShopUploadPage: React.FC = () => {
               </div>
             </button>
 
-            {shop.upiId && (
+            {hasOnlineUpi && (
               <button
                 type="button"
                 onClick={() => setPaymentChoice('UPI')}
@@ -1466,9 +1504,20 @@ export const ShopUploadPage: React.FC = () => {
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
               {t.estTotal}
             </span>
-            <span className="text-2xl font-black text-slate-950 tabular-nums">
+            <span className="text-2xl font-black text-slate-950 tabular-nums leading-none">
               ₹{calculateTotal()}
             </span>
+            {activeTab === 'NORMAL' &&
+              pageCount * copies > 1 &&
+              hasTieredExtraRate(
+                colorMode === 'COLOR' ? shop.colorRate : shop.bwRate,
+                colorMode === 'COLOR' ? shop.colorExtraRate : shop.bwExtraRate
+              ) && (
+                <span className="block text-[10px] font-bold text-emerald-700 mt-0.5">
+                  1×₹{colorMode === 'COLOR' ? shop.colorRate : shop.bwRate} + {pageCount * copies - 1}×₹
+                  {colorMode === 'COLOR' ? shop.colorExtraRate : shop.bwExtraRate}
+                </span>
+              )}
           </div>
 
           <button
@@ -1480,7 +1529,7 @@ export const ShopUploadPage: React.FC = () => {
             }
             onClick={activeTab === 'NORMAL' ? handleNormalSubmit : handleIdCardSubmit}
             className={`flex-1 py-3.5 px-4 disabled:opacity-40 text-white font-extrabold rounded-2xl shadow-md flex items-center justify-center gap-2 text-sm transition ${
-              paymentChoice === 'UPI' && shop.upiId
+              paymentChoice === 'UPI' && hasOnlineUpi
                 ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/25'
                 : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/25'
             }`}
@@ -1493,7 +1542,7 @@ export const ShopUploadPage: React.FC = () => {
             ) : (
               <>
                 <span>
-                  {paymentChoice === 'UPI' && shop.upiId ? t.payAndSend : t.sendToCounter}
+                  {paymentChoice === 'UPI' && hasOnlineUpi ? t.payAndSend : t.sendToCounter}
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </>
@@ -1524,30 +1573,71 @@ export const ShopUploadPage: React.FC = () => {
                 {lang === 'en' ? `Pay ₹${pendingUpiConfirm.amount} via UPI` : `UPI से ₹${pendingUpiConfirm.amount} पेमेंट करें`}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                {shop.shopName} • <span className="font-mono text-slate-700">{shop.upiId}</span>
+                {shop.shopName}
+                {shop.upiId && (
+                  <>
+                    {' '}
+                    • <span className="font-mono text-slate-700">{shop.upiId}</span>
+                  </>
+                )}
               </p>
             </div>
 
+            {pendingUpiConfirm.upiLink && pendingUpiConfirm.customQrUrl && (
+              <div className="bg-slate-100 p-1 rounded-xl grid grid-cols-2 gap-1 text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setShowOriginalCustomQr(false)}
+                  className={`py-1.5 rounded-lg transition ${
+                    !showOriginalCustomQr ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                  }`}
+                >
+                  {lang === 'en' ? 'Exact-Amount QR' : 'ऑटो-अमाउंट QR'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowOriginalCustomQr(true)}
+                  className={`py-1.5 rounded-lg transition ${
+                    showOriginalCustomQr ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+                  }`}
+                >
+                  {lang === 'en' ? 'Shop Custom QR' : 'शॉप कस्टम QR'}
+                </button>
+              </div>
+            )}
+
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 inline-block mx-auto">
               <img
-                src={pendingUpiConfirm.upiQrDataUrl}
+                src={
+                  showOriginalCustomQr && pendingUpiConfirm.customQrUrl
+                    ? pendingUpiConfirm.customQrUrl
+                    : pendingUpiConfirm.upiQrDataUrl
+                }
                 alt="Shop UPI QR"
-                className="w-44 h-44 mx-auto rounded-lg"
+                className="w-44 h-44 mx-auto rounded-lg object-contain bg-white"
               />
               <p className="text-[10px] font-semibold text-slate-500 mt-1.5">
-                {lang === 'en' ? 'Scan with any UPI app or tap button below' : 'किसी भी UPI ऐप से स्कैन करें या नीचे बटन दबाएँ'}
+                {showOriginalCustomQr
+                  ? lang === 'en'
+                    ? `Scan with any UPI app and enter ₹${pendingUpiConfirm.amount}`
+                    : `किसी भी UPI ऐप से स्कैन करके ₹${pendingUpiConfirm.amount} भेजें`
+                  : lang === 'en'
+                  ? 'Scan with any UPI app or tap button below'
+                  : 'किसी भी UPI ऐप से स्कैन करें या नीचे बटन दबाएँ'}
               </p>
             </div>
 
             <div className="space-y-2">
-              <a
-                href={pendingUpiConfirm.upiLink}
-                className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 transition"
-              >
-                <Smartphone className="w-4 h-4 text-emerald-400" />
-                <span>{lang === 'en' ? `Open GPay / PhonePe (₹${pendingUpiConfirm.amount})` : `GPay / PhonePe खोलें (₹${pendingUpiConfirm.amount})`}</span>
-                <ExternalLink className="w-3.5 h-3.5 opacity-70" />
-              </a>
+              {pendingUpiConfirm.upiLink && (
+                <a
+                  href={pendingUpiConfirm.upiLink}
+                  className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 transition"
+                >
+                  <Smartphone className="w-4 h-4 text-emerald-400" />
+                  <span>{lang === 'en' ? `Open GPay / PhonePe (₹${pendingUpiConfirm.amount})` : `GPay / PhonePe खोलें (₹${pendingUpiConfirm.amount})`}</span>
+                  <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+                </a>
+              )}
 
               <button
                 type="button"

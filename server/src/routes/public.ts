@@ -23,8 +23,11 @@ router.get('/shops/:slug', async (req: Request, res: Response): Promise<void> =>
         slug: true,
         city: true,
         upiId: true,
+        customQrUrl: true,
         bwRate: true,
+        bwExtraRate: true,
         colorRate: true,
+        colorExtraRate: true,
         idCardRate: true,
         isCounterOpen: true,
         planStatus: true,
@@ -122,14 +125,21 @@ router.post('/shops/:slug/jobs/init', publicUploadLimiter, async (req: Request, 
     const validJobType = jobType === 'ID_CARD' ? 'ID_CARD' : 'NORMAL';
     const validPaymentMethod = paymentMethod === 'UPI_PAID' ? 'UPI_PAID' : 'COUNTER';
 
-    // Calculate Estimated Price
+    const calcTieredTotal = (totalPages: number, firstRate: number, extraRate?: number | null): number => {
+      if (totalPages <= 0) return 0;
+      const effectiveExtra = extraRate !== null && extraRate !== undefined ? extraRate : firstRate;
+      const raw = totalPages === 1 ? firstRate : firstRate + (totalPages - 1) * effectiveExtra;
+      return Math.round(raw * 100) / 100;
+    };
+
+    // Calculate Estimated Price (supports separate rate after 1st page)
     let estimatedPrice = 0;
     if (validJobType === 'ID_CARD') {
-      estimatedPrice = parsedCopies * (shop.idCardRate || 10);
+      estimatedPrice = Math.round(parsedCopies * (shop.idCardRate || 10) * 100) / 100;
     } else if (validColorMode === 'COLOR') {
-      estimatedPrice = parsedPages * parsedCopies * shop.colorRate;
+      estimatedPrice = calcTieredTotal(parsedPages * parsedCopies, shop.colorRate, shop.colorExtraRate);
     } else {
-      estimatedPrice = parsedPages * parsedCopies * shop.bwRate;
+      estimatedPrice = calcTieredTotal(parsedPages * parsedCopies, shop.bwRate, shop.bwExtraRate);
     }
 
     // Daily Sequential Token calculation in IST (UTC+5:30)
@@ -319,6 +329,7 @@ router.get('/jobs/:jobId', async (req: Request, res: Response): Promise<void> =>
             id: true,
             shopName: true,
             upiId: true,
+            customQrUrl: true,
           },
         },
       },

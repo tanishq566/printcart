@@ -50,14 +50,17 @@ model Shop {
   slug          String     @unique
   ownerPhone    String     @unique
   passwordHash  String
-  city          String?
-  upiId         String?
-  role          Role       @default(SHOPKEEPER)
+  city           String?
+  upiId          String?
+  customQrUrl    String?
+  role           Role       @default(SHOPKEEPER)
 
   // Pricing Configuration (in INR)
-  bwRate        Float      @default(2)
-  colorRate     Float      @default(10)
-  idCardRate    Float      @default(10)
+  bwRate         Float      @default(2)
+  bwExtraRate    Float?
+  colorRate      Float      @default(10)
+  colorExtraRate Float?
+  idCardRate     Float      @default(10)
 
   // Operational & Subscription State
   isCounterOpen Boolean    @default(true)

@@ -22,8 +22,11 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
         ownerPhone: true,
         city: true,
         upiId: true,
+        customQrUrl: true,
         bwRate: true,
+        bwExtraRate: true,
         colorRate: true,
+        colorExtraRate: true,
         idCardRate: true,
         isCounterOpen: true,
         planStatus: true,
@@ -58,8 +61,11 @@ router.patch('/settings', async (req: Request, res: Response): Promise<void> => 
       shopName,
       city,
       upiId,
+      customQrUrl,
       bwRate,
+      bwExtraRate,
       colorRate,
+      colorExtraRate,
       idCardRate,
       isCounterOpen,
     } = req.body;
@@ -69,8 +75,33 @@ router.patch('/settings', async (req: Request, res: Response): Promise<void> => 
     if (shopName !== undefined) updateData.shopName = shopName.toString().trim();
     if (city !== undefined) updateData.city = city ? city.toString().trim() : null;
     if (upiId !== undefined) updateData.upiId = upiId ? upiId.toString().trim() : null;
+    if (customQrUrl !== undefined) {
+      if (!customQrUrl || typeof customQrUrl !== 'string' || customQrUrl.trim() === '') {
+        updateData.customQrUrl = null;
+      } else {
+        const trimmedQr = customQrUrl.trim();
+        const isSafeQr = trimmedQr.startsWith('data:image/') || trimmedQr.startsWith('https://');
+        if (!isSafeQr || trimmedQr.length > 450000) {
+          res.status(400).json({ error: 'Invalid QR image format or size (max 300KB).' });
+          return;
+        }
+        updateData.customQrUrl = trimmedQr;
+      }
+    }
     if (bwRate !== undefined && !isNaN(Number(bwRate))) updateData.bwRate = Math.max(0, Number(bwRate));
+    if (bwExtraRate !== undefined) {
+      updateData.bwExtraRate =
+        bwExtraRate === null || bwExtraRate === '' || isNaN(Number(bwExtraRate))
+          ? null
+          : Math.max(0, Number(bwExtraRate));
+    }
     if (colorRate !== undefined && !isNaN(Number(colorRate))) updateData.colorRate = Math.max(0, Number(colorRate));
+    if (colorExtraRate !== undefined) {
+      updateData.colorExtraRate =
+        colorExtraRate === null || colorExtraRate === '' || isNaN(Number(colorExtraRate))
+          ? null
+          : Math.max(0, Number(colorExtraRate));
+    }
     if (idCardRate !== undefined && !isNaN(Number(idCardRate))) updateData.idCardRate = Math.max(0, Number(idCardRate));
     if (isCounterOpen !== undefined) updateData.isCounterOpen = Boolean(isCounterOpen);
 
@@ -84,8 +115,11 @@ router.patch('/settings', async (req: Request, res: Response): Promise<void> => 
         ownerPhone: true,
         city: true,
         upiId: true,
+        customQrUrl: true,
         bwRate: true,
+        bwExtraRate: true,
         colorRate: true,
+        colorExtraRate: true,
         idCardRate: true,
         isCounterOpen: true,
         planStatus: true,

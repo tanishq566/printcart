@@ -48,6 +48,7 @@ import {
   AlertCircle,
   Maximize2,
   Crop,
+  Monitor,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
@@ -89,9 +90,19 @@ interface SidebarProps {
   onClose: () => void;
   onLogout: () => void;
   onUpgrade: () => void;
+  isInstalled: boolean;
+  onInstallApp: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ shop, isOpen, onClose, onLogout, onUpgrade }) => {
+const Sidebar: React.FC<SidebarProps> = ({
+  shop,
+  isOpen,
+  onClose,
+  onLogout,
+  onUpgrade,
+  isInstalled,
+  onInstallApp,
+}) => {
   const nav = [
     { to: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" />, label: 'Live Counter' },
     { to: '/dashboard/standee', icon: <QrCode className="w-4 h-4" />, label: 'QR Standee' },
@@ -160,6 +171,24 @@ const Sidebar: React.FC<SidebarProps> = ({ shop, isOpen, onClose, onLogout, onUp
               </span>
               Open Customer Page ↗
             </a>
+          )}
+          {!isInstalled && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onInstallApp();
+              }}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 mt-2 rounded-xl text-sm font-bold text-indigo-200 bg-indigo-950/70 hover:bg-indigo-900/70 border border-indigo-700/60 transition"
+            >
+              <span className="flex items-center gap-3">
+                <Monitor className="w-4 h-4 text-indigo-400" />
+                <span>Install PC App</span>
+              </span>
+              <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+                Desktop
+              </span>
+            </button>
           )}
         </nav>
 
@@ -362,9 +391,17 @@ const EmptyState: React.FC<EmptyStateProps> = ({ shop, hasGeneratedQr, onOpenQr 
 export const DashboardPage: React.FC = () => {
   const { shop, refreshShop, isAuthenticated, logout, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const { isInstallable, promptInstall } = usePwaInstall();
+  const { isInstallable, isInstalled, promptInstall } = usePwaInstall();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const handleInstallApp = async () => {
+    const outcome = await promptInstall();
+    if (outcome === 'unavailable') {
+      setShowInstallModal(true);
+    }
+  };
 
   // Shop QR & Poster Generation / Display State
   const [hasGeneratedQr, setHasGeneratedQr] = useState<boolean>(false);
@@ -930,6 +967,8 @@ export const DashboardPage: React.FC = () => {
         onClose={() => setSidebarOpen(false)}
         onLogout={async () => { await logout(); navigate('/login'); }}
         onUpgrade={() => setShowUpgradeModal(true)}
+        isInstalled={isInstalled}
+        onInstallApp={handleInstallApp}
       />
 
       {/* Main column */}
@@ -994,13 +1033,18 @@ export const DashboardPage: React.FC = () => {
               Counter {isCounterOpen ? 'OPEN' : 'CLOSED'}
             </button>
 
-            {/* Install PWA */}
-            {isInstallable && (
+            {/* Install Desktop PWA Software */}
+            {!isInstalled && (
               <button
-                onClick={promptInstall}
-                className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition"
+                type="button"
+                onClick={handleInstallApp}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition shadow-xs"
+                title="Install PrintCart Counter Software on this Computer"
               >
-                Install App
+                <Monitor className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {isInstallable ? 'Install PC App' : 'Get Desktop App'}
+                </span>
               </button>
             )}
 
@@ -1481,6 +1525,63 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Desktop App / PWA Install Guide Modal (when browser hides one-click native prompt) */}
+      {showInstallModal && (
+        <div className="fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-slate-100 relative">
+            <button
+              type="button"
+              onClick={() => setShowInstallModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                <Monitor className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-white">
+                  Install PrintCart on Your Computer
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Desktop shortcut & separate Counter window (Chrome / Edge)
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-2.5 text-xs text-slate-300 leading-relaxed">
+              <p className="font-bold text-indigo-300">2-Second Install Steps (Windows / Mac):</p>
+              <ol className="list-decimal list-inside space-y-1.5">
+                <li>
+                  Browser ke top-right URL bar me <strong>Install Icon (Monitor/Download)</strong> par click karein.
+                </li>
+                <li>
+                  Ya Browser Menu (<strong>⋮</strong> / <strong>⋯</strong>) kholein &rarr;{' '}
+                  <strong>Cast, save, and share</strong> (ya <strong>Apps</strong>) &rarr;{' '}
+                  <strong>Install PrintCart...</strong> par click karein.
+                </li>
+                <li>
+                  App install hote hi Desktop & Taskbar par direct software icon ban jayega.
+                </li>
+              </ol>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowInstallModal(false)}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition"
+              >
+                Samajh Gaya ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* In-Counter Shopkeeper Document Editor Modal */}
       {shopEditorSession && (
         <DocumentEditorModal

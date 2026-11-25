@@ -16,12 +16,16 @@ import {
   CreditCard,
   Printer,
   Calendar,
+  UploadCloud,
+  Trash2,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Footer } from '../components/Footer';
 import { UpgradeModal } from '../components/UpgradeModal';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
+import { processCustomQrImage } from '../utils/qrUploadHelper';
+import { calcTieredPrintTotal } from '../utils/pricing';
 
 export const SettingsPage: React.FC = () => {
   const { shop, refreshShop, isAuthenticated, loading: authLoading } = useAuth();
@@ -30,8 +34,13 @@ export const SettingsPage: React.FC = () => {
   const [shopName, setShopName] = useState('');
   const [city, setCity] = useState('');
   const [upiId, setUpiId] = useState('');
+  const [customQrUrl, setCustomQrUrl] = useState<string | null>(null);
+  const [qrScanFeedback, setQrScanFeedback] = useState<string | null>(null);
+  const [processingQr, setProcessingQr] = useState(false);
   const [bwRate, setBwRate] = useState('2');
+  const [bwExtraRate, setBwExtraRate] = useState('');
   const [colorRate, setColorRate] = useState('10');
+  const [colorExtraRate, setColorExtraRate] = useState('');
   const [idCardRate, setIdCardRate] = useState('10');
   const [isCounterOpen, setIsCounterOpen] = useState(true);
 
@@ -52,9 +61,20 @@ export const SettingsPage: React.FC = () => {
       setShopName(shop.shopName || '');
       setCity(shop.city || '');
       setUpiId(shop.upiId || '');
-      setBwRate(shop.bwRate?.toString() || '2');
-      setColorRate(shop.colorRate?.toString() || '10');
-      setIdCardRate(shop.idCardRate?.toString() || '10');
+      setCustomQrUrl(shop.customQrUrl || null);
+      setBwRate(shop.bwRate !== undefined ? shop.bwRate.toString() : '2');
+      setBwExtraRate(
+        shop.bwExtraRate !== null && shop.bwExtraRate !== undefined
+          ? shop.bwExtraRate.toString()
+          : ''
+      );
+      setColorRate(shop.colorRate !== undefined ? shop.colorRate.toString() : '10');
+      setColorExtraRate(
+        shop.colorExtraRate !== null && shop.colorExtraRate !== undefined
+          ? shop.colorExtraRate.toString()
+          : ''
+      );
+      setIdCardRate(shop.idCardRate !== undefined ? shop.idCardRate.toString() : '10');
       setIsCounterOpen(shop.isCounterOpen ?? true);
     }
   }, [shop]);
@@ -84,11 +104,47 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleCustomQrUpload = async (file: File) => {
+    try {
+      setProcessingQr(true);
+      setErrorMessage(null);
+      setQrScanFeedback(null);
+      const result = await processCustomQrImage(file);
+      setCustomQrUrl(result.customQrUrl);
+      if (result.detectedUpiId) {
+        setUpiId(result.detectedUpiId);
+        setQrScanFeedback(
+          `✓ QR scanned! UPI ID auto-filled: ${result.detectedUpiId} — neeche Save button zaroor dabayein.`
+        );
+      } else {
+        setQrScanFeedback(
+          '✓ Custom QR photo ready hai — Save Changes dabakar customer page par live karein.'
+        );
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Could not process the selected QR image.');
+    } finally {
+      setProcessingQr(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setSuccessMessage(null);
     setErrorMessage(null);
+
+    const parsedBw = bwRate.trim() !== '' && !isNaN(Number(bwRate)) ? Number(bwRate) : 2;
+    const parsedBwExtra =
+      bwExtraRate.trim() !== '' && !isNaN(Number(bwExtraRate)) ? Number(bwExtraRate) : null;
+    const parsedColor =
+      colorRate.trim() !== '' && !isNaN(Number(colorRate)) ? Number(colorRate) : 10;
+    const parsedColorExtra =
+      colorExtraRate.trim() !== '' && !isNaN(Number(colorExtraRate))
+        ? Number(colorExtraRate)
+        : null;
+    const parsedIdCard =
+      idCardRate.trim() !== '' && !isNaN(Number(idCardRate)) ? Number(idCardRate) : 10;
 
     try {
       await apiFetch('/shop/settings', {
@@ -97,14 +153,18 @@ export const SettingsPage: React.FC = () => {
           shopName: shopName.trim(),
           city: city.trim() || null,
           upiId: upiId.trim() || null,
-          bwRate: Number(bwRate) || 2,
-          colorRate: Number(colorRate) || 10,
-          idCardRate: Number(idCardRate) || 10,
+          customQrUrl: customQrUrl || null,
+          bwRate: parsedBw,
+          bwExtraRate: parsedBwExtra,
+          colorRate: parsedColor,
+          colorExtraRate: parsedColorExtra,
+          idCardRate: parsedIdCard,
           isCounterOpen,
         }),
       });
 
       await refreshShop();
+      setQrScanFeedback(null);
       setSuccessMessage('Shop settings saved successfully! ✓');
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {
@@ -388,52 +448,113 @@ export const SettingsPage: React.FC = () => {
               <span>Customer Printing Rates (₹ in INR)</span>
             </h3>
             <p className="text-xs text-slate-500">
-              Customer document upload screen par live rate aur total bill calculate hota hai.
+              1st page ka rate aur uske baad (2nd, 3rd, 10th, 100th page) ka extra-page rate alag-alag set kar sakte hain taaki bulk print sasta pade.
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200">
-                <label className="block text-xs font-bold text-blue-900 uppercase tracking-wider mb-1">
-                  Black & White Rate
-                </label>
-                <div className="relative mt-2">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-bold">
-                    ₹
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    required
-                    value={bwRate}
-                    onChange={(e) => setBwRate(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 bg-white rounded-lg border border-slate-300 font-extrabold text-lg text-slate-900"
-                  />
-                  <span className="text-[11px] text-slate-500 block mt-1">per page (A4)</span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+              {/* B&W Tiered Card */}
+              <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200 space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-blue-900 uppercase tracking-wider mb-1">
+                    Black & White — 1st Page
+                  </label>
+                  <div className="relative mt-1.5">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-bold">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      required
+                      value={bwRate}
+                      onChange={(e) => setBwRate(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-white rounded-lg border border-slate-300 font-extrabold text-lg text-slate-900"
+                    />
+                    <span className="text-[11px] text-slate-500 block mt-1">
+                      Default 1st page price (A4)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-2.5 border-t border-blue-200/80">
+                  <label className="block text-[11px] font-bold text-blue-900 uppercase tracking-wider mb-1">
+                    After 1st Page (2nd+ Page)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-bold text-sm">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={bwExtraRate}
+                      onChange={(e) => setBwExtraRate(e.target.value)}
+                      placeholder={`Same (₹${bwRate || 0})`}
+                      className="w-full pl-8 pr-3 py-1.5 bg-white rounded-lg border border-slate-300 font-bold text-sm text-slate-900"
+                    />
+                  </div>
+                  <p className="text-[11px] text-blue-800 font-semibold mt-1.5">
+                    {bwExtraRate.trim() !== ''
+                      ? `Example: 5p = ₹${calcTieredPrintTotal(5, Number(bwRate) || 0, Number(bwExtraRate))} • 10p = ₹${calcTieredPrintTotal(10, Number(bwRate) || 0, Number(bwExtraRate))}`
+                      : `Blank = flat ₹${bwRate || 0}/page on all pages`}
+                  </p>
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200">
-                <label className="block text-xs font-bold text-amber-900 uppercase tracking-wider mb-1">
-                  Color Print Rate
-                </label>
-                <div className="relative mt-2">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-bold">
-                    ₹
-                  </span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    required
-                    value={colorRate}
-                    onChange={(e) => setColorRate(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 bg-white rounded-lg border border-slate-300 font-extrabold text-lg text-slate-900"
-                  />
-                  <span className="text-[11px] text-slate-500 block mt-1">per page (A4)</span>
+              {/* Color Tiered Card */}
+              <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200 space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-amber-900 uppercase tracking-wider mb-1">
+                    Color Print — 1st Page
+                  </label>
+                  <div className="relative mt-1.5">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-bold">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      required
+                      value={colorRate}
+                      onChange={(e) => setColorRate(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-white rounded-lg border border-slate-300 font-extrabold text-lg text-slate-900"
+                    />
+                    <span className="text-[11px] text-slate-500 block mt-1">
+                      Default 1st page price (A4)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-2.5 border-t border-amber-200/80">
+                  <label className="block text-[11px] font-bold text-amber-900 uppercase tracking-wider mb-1">
+                    After 1st Page (2nd+ Page)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 font-bold text-sm">
+                      ₹
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={colorExtraRate}
+                      onChange={(e) => setColorExtraRate(e.target.value)}
+                      placeholder={`Same (₹${colorRate || 0})`}
+                      className="w-full pl-8 pr-3 py-1.5 bg-white rounded-lg border border-slate-300 font-bold text-sm text-slate-900"
+                    />
+                  </div>
+                  <p className="text-[11px] text-amber-800 font-semibold mt-1.5">
+                    {colorExtraRate.trim() !== ''
+                      ? `Example: 5p = ₹${calcTieredPrintTotal(5, Number(colorRate) || 0, Number(colorExtraRate))} • 10p = ₹${calcTieredPrintTotal(10, Number(colorRate) || 0, Number(colorExtraRate))}`
+                      : `Blank = flat ₹${colorRate || 0}/page on all pages`}
+                  </p>
                 </div>
               </div>
 
+              {/* ID Card Rate Card */}
               <div className="p-4 rounded-xl bg-teal-50/50 border border-teal-200">
                 <label className="block text-xs font-bold text-teal-900 uppercase tracking-wider mb-1">
                   ID Card Merge Rate
@@ -451,35 +572,114 @@ export const SettingsPage: React.FC = () => {
                     onChange={(e) => setIdCardRate(e.target.value)}
                     className="w-full pl-8 pr-3 py-2 bg-white rounded-lg border border-slate-300 font-extrabold text-lg text-slate-900"
                   />
-                  <span className="text-[11px] text-slate-500 block mt-1">per merged A4 sheet</span>
+                  <span className="text-[11px] text-slate-500 block mt-1">
+                    per merged A4 sheet (Front + Back)
+                  </span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Section: UPI Payment Setup */}
+          {/* Section: UPI Payment & Custom QR Setup */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
             <h3 className="font-extrabold text-slate-900 text-lg flex items-center gap-2 border-b border-slate-100 pb-3">
               <CreditCard className="w-5 h-5 text-indigo-600" />
-              <span>Shop UPI Account (For Customer Direct Payment)</span>
+              <span>Shop UPI & Custom Payment QR (Customer Direct Payment)</span>
             </h3>
 
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
-                  Aapka Shop UPI ID (GPay / PhonePe / Paytm / BHIM)
-                </label>
-                <input
-                  type="text"
-                  value={upiId}
-                  onChange={(e) => setUpiId(e.target.value)}
-                  placeholder="e.g. vermadigital@okhdfcbank ya 9876543210@paytm"
-                  className="w-full max-w-md px-3.5 py-2.5 rounded-lg border border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 text-sm font-medium outline-none"
-                />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              {/* Left: Manual UPI ID */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Option 1: Shop UPI ID (Auto Exact-Amount QR)
+                  </label>
+                  <input
+                    type="text"
+                    value={upiId}
+                    onChange={(e) => setUpiId(e.target.value)}
+                    placeholder="e.g. vermadigital@okhdfcbank ya 9876543210@paytm"
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 text-slate-900 text-sm font-medium outline-none"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  💡 <strong>Zero Commission:</strong> UPI ID daalne par PrintCart har customer ke exact bill (e.g. ₹23) ke saath dynamic UPI QR + GPay/PhonePe button bana deta hai. Paise seedha aapke bank me jaate hain.
+                </p>
               </div>
-              <p className="text-xs text-slate-500 max-w-2xl leading-relaxed">
-                💡 <strong>Zero Platform Commission:</strong> Customer jab print job upload karega, unhe deep-link UPI button dikhega. Customer ke phone ka UPI app (GPay/PhonePe) khulega aur paise seedha aapke bank account me jayenge. PrintCart koi commission nahi kaatta.
-              </p>
+
+              {/* Right: Upload Existing Paytm / PhonePe / GPay QR Photo */}
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                    Option 2: Apna Paytm / PhonePe / GPay QR Upload Karein
+                  </span>
+                  {customQrUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomQrUrl(null);
+                        setQrScanFeedback('Custom QR removed. Save Changes dabakar update karein.');
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Remove</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-4">
+                  {customQrUrl ? (
+                    <div className="w-24 h-24 rounded-xl border border-slate-300 bg-white p-1.5 shrink-0 flex items-center justify-center shadow-xs">
+                      <img
+                        src={customQrUrl}
+                        alt="Uploaded Shop Custom QR"
+                        className="w-full h-full object-contain rounded-lg"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-24 h-24 rounded-xl border-2 border-dashed border-slate-300 bg-white shrink-0 flex flex-col items-center justify-center text-slate-400 text-[10px] font-bold text-center p-2">
+                      <QrCode className="w-6 h-6 mb-1" />
+                      <span>No QR Photo</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <input
+                      id="custom-qr-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleCustomQrUpload(e.target.files[0]);
+                          e.target.value = '';
+                        }
+                      }}
+                      className="sr-only"
+                    />
+                    <label
+                      htmlFor="custom-qr-upload"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer transition shadow-xs"
+                    >
+                      {processingQr ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <UploadCloud className="w-3.5 h-3.5" />
+                      )}
+                      <span>{customQrUrl ? 'Change QR Image' : 'Upload Custom QR'}</span>
+                    </label>
+                    <p className="text-[11px] text-slate-500 leading-snug">
+                      QR photo upload karte hi UPI ID automatic scan ho jaati hai, aur customer ko aapka original QR dikhane ka option bhi milta hai.
+                    </p>
+                  </div>
+                </div>
+
+                {qrScanFeedback && (
+                  <div className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                    {qrScanFeedback}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

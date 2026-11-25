@@ -14,9 +14,12 @@ export interface Shop {
   ownerPhone: string;
   city?: string | null;
   upiId?: string | null;
+  customQrUrl?: string | null;
   role: Role;
   bwRate: number;
+  bwExtraRate?: number | null;
   colorRate: number;
+  colorExtraRate?: number | null;
   idCardRate: number;
   isCounterOpen: boolean;
   planStatus: PlanStatus;
