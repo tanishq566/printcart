@@ -13,6 +13,7 @@ import {
 import { printDocumentViaFrame } from '../lib/printHelper';
 import { DocumentEditorModal } from '../components/DocumentEditorModal';
 import type { EditorState } from '../lib/imageProcessor';
+import { unlockVoiceAudio, notifyShopkeeperPrintRequest } from '../lib/voiceAlert';
 import {
   Printer,
   ShieldCheck,
@@ -68,6 +69,7 @@ interface PrintJobCard {
   colorMode: 'BW' | 'COLOR';
   sides: 'SINGLE' | 'DOUBLE';
   estimatedPrice: number;
+  paymentMethod?: string;
   status: 'PENDING' | 'REVIEWING' | 'PRINTING';
   createdAt: string;
   expiresAt: string;
@@ -525,26 +527,19 @@ export const DashboardPage: React.FC = () => {
   const pdfDocRef = useRef<any>(null);
   const socketRef = useRef<Socket | null>(null);
   const printFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
 
-  const playChime = () => {
-    if (!soundEnabled) return;
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.4);
-    } catch (e) {
-      console.warn('Audio chime warning:', e);
-    }
+  // Unlock browser speech/audio permissions on first dashboard click
+  useEffect(() => {
+    const unlockOnce = () => unlockVoiceAudio();
+    window.addEventListener('pointerdown', unlockOnce, { once: true });
+    return () => window.removeEventListener('pointerdown', unlockOnce);
+  }, []);
+
+  const announcePrintRequest = (tokenNumber: number, paymentMethod?: string) => {
+    if (!soundEnabledRef.current) return;
+    notifyShopkeeperPrintRequest(tokenNumber, paymentMethod);
   };
 
   useEffect(() => {
@@ -600,7 +595,7 @@ export const DashboardPage: React.FC = () => {
         return [newJob, ...prev];
       });
       setSelectedJobId((curr) => curr || newJob.id);
-      playChime();
+      announcePrintRequest(newJob.tokenNumber, newJob.paymentMethod);
       loadStats();
     });
     socket.on('job:status', (payload: { jobId: string; status: string }) => {
@@ -623,7 +618,7 @@ export const DashboardPage: React.FC = () => {
 
     socketRef.current = socket;
     return () => { socket.disconnect(); };
-  }, [shop?.id, soundEnabled]);
+  }, [shop?.id]);
 
   const handleToggleCounter = async () => {
     const nextVal = !isCounterOpen;
@@ -977,9 +972,13 @@ export const DashboardPage: React.FC = () => {
 
             {/* Sound toggle */}
             <button
-              onClick={() => setSoundEnabled(!soundEnabled)}
+              onClick={() => {
+                const next = !soundEnabled;
+                setSoundEnabled(next);
+                if (next) unlockVoiceAudio();
+              }}
               className={`p-2 rounded-lg border transition ${soundEnabled ? 'bg-blue-950 text-blue-400 border-blue-800' : 'bg-slate-900 text-slate-500 border-slate-800'}`}
-              title={soundEnabled ? 'Sound ON' : 'Sound MUTED'}
+              title={soundEnabled ? 'Hindi Voice Alerts ON' : 'Voice Alerts MUTED'}
             >
               {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
@@ -1107,15 +1106,22 @@ export const DashboardPage: React.FC = () => {
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">{formatTimeLeft(job.expiresAt)}</div>
                         </div>
                       </div>
-                      <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
-                        <span className="truncate max-w-[130px] font-mono text-slate-500">{job.fileName || (isIdCard ? 'ID_Card_Merged.pdf' : 'document')}</span>
-                        <div className="flex items-center gap-1">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                      <div className="mt-2 flex items-center justify-between gap-1.5 text-[11px] text-slate-400">
+                        <span className="truncate min-w-0 flex-1 font-mono text-slate-500">{job.fileName || (isIdCard ? 'ID_Card_Merged.pdf' : 'document')}</span>
+                        <div className="flex items-center gap-1 shrink-0 whitespace-nowrap">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${
+                            job.paymentMethod === 'UPI_PAID'
+                              ? 'bg-emerald-950 text-emerald-300'
+                              : 'bg-amber-950/70 text-amber-300'
+                          }`}>
+                            {job.paymentMethod === 'UPI_PAID' ? 'UPI ✓' : 'Counter'}
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${
                             isIdCard ? 'bg-teal-950 text-teal-300' : isColor ? 'bg-amber-950 text-amber-300' : 'bg-blue-950 text-blue-300'
                           }`}>
                             {isIdCard ? 'ID CARD' : job.colorMode}
                           </span>
-                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold">{job.pageCount}p×{job.copies}c</span>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold whitespace-nowrap">{job.pageCount}p×{job.copies}c</span>
                         </div>
                       </div>
                     </div>
@@ -1136,15 +1142,22 @@ export const DashboardPage: React.FC = () => {
             {selectedJob ? (
               <>
                 {/* Preview controls bar */}
-                <div className="h-12 bg-slate-950/80 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-black font-mono text-blue-400">Token #{selectedJob.tokenNumber}</span>
-                    <span className="text-xs text-slate-400 hidden sm:inline">• {selectedJob.customerName || 'Walk-in'}</span>
-                    <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
+                <div className="min-h-12 py-1.5 bg-slate-950/80 border-b border-slate-800 px-3 sm:px-4 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
+                    <span className="text-base sm:text-lg font-black font-mono text-blue-400 shrink-0 whitespace-nowrap">Token #{selectedJob.tokenNumber}</span>
+                    <span className="text-xs text-slate-400 hidden xl:inline truncate max-w-[120px]">• {selectedJob.customerName || 'Walk-in'}</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold shrink-0 whitespace-nowrap">
                       {selectedJob.colorMode} • {selectedJob.sides} • {selectedJob.copies}×
                     </span>
+                    <span className={`text-[11px] px-2 py-0.5 rounded font-bold shrink-0 whitespace-nowrap ${
+                      selectedJob.paymentMethod === 'UPI_PAID'
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                        : 'bg-amber-950/80 text-amber-300 border border-amber-800/70'
+                    }`}>
+                      {selectedJob.paymentMethod === 'UPI_PAID' ? 'UPI Paid ✓' : 'Pay Counter'}
+                    </span>
                   </div>
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-1 shrink-0 ml-auto">
                     {previewMime === 'application/pdf' && pdfTotalPages > 1 && (
                       <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-lg text-xs font-mono mr-2">
                         <button onClick={() => setPdfPage(Math.max(1, pdfPage - 1))} disabled={pdfPage <= 1} className="text-slate-400 hover:text-white disabled:opacity-30">
@@ -1157,28 +1170,37 @@ export const DashboardPage: React.FC = () => {
                       </div>
                     )}
                     <button onClick={() => setZoomLevel((z) => Math.max(0.6, z - 0.2))} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg" title="Zoom Out"><ZoomOut className="w-4 h-4" /></button>
-                    <span className="text-xs font-mono text-slate-400 w-10 text-center">{Math.round(zoomLevel * 100)}%</span>
+                    <span className="text-xs font-mono text-slate-400 w-10 text-center hidden sm:inline-block">{Math.round(zoomLevel * 100)}%</span>
                     <button onClick={() => setZoomLevel((z) => Math.min(2.5, z + 0.2))} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg" title="Zoom In"><ZoomIn className="w-4 h-4" /></button>
                     <button onClick={() => setRotation((r) => (r + 90) % 360)} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg ml-1" title="Rotate 90°"><RotateCw className="w-4 h-4" /></button>
+                    <button
+                      onClick={handleOpenShopEditor}
+                      disabled={!previewBlobUrl || isPreparingEdit}
+                      className="px-2.5 py-1.5 bg-sky-600/20 hover:bg-sky-600/35 text-sky-300 border border-sky-500/40 rounded-lg ml-1 disabled:opacity-30 transition flex items-center gap-1.5 text-xs font-bold"
+                      title="Crop, straighten & clean document before printing"
+                    >
+                      {isPreparingEdit ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Crop className="w-3.5 h-3.5" />}
+                      <span className="hidden md:inline">{shopEditorState ? 'Edited ✓' : 'Edit'}</span>
+                    </button>
                     <button onClick={handleDownloadDocument} disabled={!previewBlobUrl} className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg ml-1 disabled:opacity-30 transition" title="Download Document (Save to PC)"><Download className="w-4 h-4" /></button>
                   </div>
                 </div>
 
                 {/* Preview body */}
-                <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-900/50 relative">
+                <div className="flex-1 min-h-0 overflow-auto p-4 flex items-center justify-center bg-slate-900/50 relative">
                   {loadingPreview ? (
                     <div className="text-center text-slate-500">
                       <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-blue-500" />
                       <span className="text-xs">Fetching document from ephemeral buffer...</span>
                     </div>
                   ) : previewMime === 'application/pdf' ? (
-                    <canvas ref={canvasRef} className="shadow-2xl rounded-sm max-w-full" />
+                    <canvas ref={canvasRef} className="shadow-2xl rounded-sm max-w-full max-h-full" />
                   ) : previewBlobUrl ? (
                     <img
                       src={previewBlobUrl}
                       alt="Document Preview"
                       style={{ transform: `scale(${zoomLevel}) rotate(${rotation}deg)`, transition: 'transform 0.15s ease-out' }}
-                      className="max-h-[80vh] object-contain shadow-2xl rounded"
+                      className="max-h-full max-w-full object-contain shadow-2xl rounded"
                     />
                   ) : (
                     <div className="text-slate-500 text-xs">Preview unavailable</div>

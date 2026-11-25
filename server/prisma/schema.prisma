@@ -95,6 +95,7 @@ model PrintJob {
   colorMode      ColorMode  @default(BW)
   sides          PrintSides @default(SINGLE)
   estimatedPrice Float      @default(0)
+  paymentMethod  String     @default("COUNTER") // COUNTER | UPI_PAID
 
   status         JobStatus  @default(UPLOADING)
   rejectReason   String?

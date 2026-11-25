@@ -2,12 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { io, Socket } from 'socket.io-client';
 import { PDFDocument, rgb } from 'pdf-lib';
+import QRCode from 'qrcode';
 import {
   Printer,
   ShieldCheck,
   UploadCloud,
   FileText,
-  CreditCard,
   CheckCircle2,
   XCircle,
   AlertCircle,
@@ -23,11 +23,16 @@ import {
   RefreshCw,
   ExternalLink,
   Crop,
+  Banknote,
+  Smartphone,
+  Volume2,
+  X,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { Shop } from '../types';
 import { DocumentEditorModal } from '../components/DocumentEditorModal';
 import { EditorState, loadFileToCanvas, exportCanvasToFile } from '../lib/imageProcessor';
+import { unlockVoiceAudio, notifyCustomerPrintApproved } from '../lib/voiceAlert';
 
 interface JobInitResponse {
   jobId: string;
@@ -48,6 +53,7 @@ interface JobStatusData {
   colorMode: 'BW' | 'COLOR';
   sides: 'SINGLE' | 'DOUBLE';
   estimatedPrice: number;
+  paymentMethod?: 'COUNTER' | 'UPI_PAID' | string;
   status: 'UPLOADING' | 'PENDING' | 'REVIEWING' | 'PRINTING' | 'COMPLETED' | 'REJECTED' | 'EXPIRED';
   rejectReason?: string;
   createdAt: string;
@@ -105,11 +111,25 @@ export const ShopUploadPage: React.FC = () => {
     isReEdit: boolean;
   } | null>(null);
 
+  // --- Pre-Request Payment & Tracking State ---
+  const [paymentChoice, setPaymentChoice] = useState<'COUNTER' | 'UPI'>('COUNTER');
+  const [pendingUpiConfirm, setPendingUpiConfirm] = useState<{
+    jobId: string;
+    tokenNumber: number;
+    amount: number;
+    upiLink: string;
+    upiQrDataUrl: string;
+  } | null>(null);
+  const [confirmingUpi, setConfirmingUpi] = useState(false);
+
   // --- Uploading & Live Tracking State ---
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
   const [activeJob, setActiveJob] = useState<JobStatusData | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const langRef = useRef(lang);
+  langRef.current = lang;
+  const announcedStatusRef = useRef<Record<string, boolean>>({});
 
   // Translations
   const t = {
@@ -154,6 +174,15 @@ export const ShopUploadPage: React.FC = () => {
       replaceFile: 'Change File',
       editedReady: 'Cropped & Enhanced ✓',
       rawReady: 'Ready for Print',
+      payOptionTitle: 'Choose Payment Method',
+      payCounterTitle: 'Pay at Counter',
+      payCounterSub: 'Cash / Scan Counter QR',
+      payUpiNowTitle: 'Pay Now via UPI',
+      payUpiNowSub: 'GPay • PhonePe • Paytm',
+      payAndSend: 'Pay & Send Request →',
+      paidUpiBadge: 'Paid Online via UPI ✓',
+      payCounterBadge: 'Pay at Counter',
+      printingVoiceBanner: 'Print approved! Your document is printing now. Collect at counter.',
     },
     hi: {
       privacyPill: '🔒 100% प्राइवेट • प्रिंट होते ही सर्वर से तुरंत डिलीट',
@@ -196,6 +225,15 @@ export const ShopUploadPage: React.FC = () => {
       replaceFile: 'फाइल बदलें',
       editedReady: 'क्रॉप और साफ हो गई ✓',
       rawReady: 'प्रिंट के लिए तैयार',
+      payOptionTitle: 'पेमेंट का तरीका चुनें',
+      payCounterTitle: 'काउंटर पर पे करें',
+      payCounterSub: 'नकद कैश या काउंटर QR',
+      payUpiNowTitle: 'अभी UPI से पे करें',
+      payUpiNowSub: 'GPay • PhonePe • Paytm',
+      payAndSend: 'UPI पे करें और प्रिंट भेजें →',
+      paidUpiBadge: 'UPI पेमेंट हो चुकी है ✓',
+      payCounterBadge: 'काउंटर पर पेमेंट करें',
+      printingVoiceBanner: 'प्रिंट अप्रूव हो गया! आपका प्रिंट निकल रहा है, कृपया काउंटर से लें।',
     },
   }[lang];
 
@@ -232,6 +270,17 @@ export const ShopUploadPage: React.FC = () => {
     newSocket.on('job:status', (payload: { jobId: string; status: any; rejectReason?: string }) => {
       if (payload.jobId === activeJob.id) {
         setActiveJob((prev) => (prev ? { ...prev, status: payload.status, rejectReason: payload.rejectReason } : null));
+        if (payload.status === 'PRINTING' && !announcedStatusRef.current[`${payload.jobId}:PRINTING`]) {
+          announcedStatusRef.current[`${payload.jobId}:PRINTING`] = true;
+          notifyCustomerPrintApproved(langRef.current, activeJob.tokenNumber, 'PRINTING');
+        } else if (
+          payload.status === 'COMPLETED' &&
+          !announcedStatusRef.current[`${payload.jobId}:PRINTING`] &&
+          !announcedStatusRef.current[`${payload.jobId}:COMPLETED`]
+        ) {
+          announcedStatusRef.current[`${payload.jobId}:COMPLETED`] = true;
+          notifyCustomerPrintApproved(langRef.current, activeJob.tokenNumber, 'COMPLETED');
+        }
       }
     });
 
@@ -388,9 +437,55 @@ export const ShopUploadPage: React.FC = () => {
     return rate * pageCount * copies;
   };
 
+  const confirmAndTrackJob = async (jobId: string, method: 'COUNTER' | 'UPI_PAID') => {
+    await apiFetch(`/public/jobs/${jobId}/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ paymentMethod: method }),
+    });
+    const fullJob = await apiFetch<{ job: JobStatusData }>(`/public/jobs/${jobId}`);
+    setActiveJob(fullJob.job);
+  };
+
+  const finalizeOrPromptPayment = async (initRes: JobInitResponse) => {
+    const wantsUpi = paymentChoice === 'UPI' && Boolean(shop?.upiId) && initRes.estimatedPrice > 0;
+    if (!wantsUpi) {
+      setUploadProgress('Notifying shopkeeper counter...');
+      await confirmAndTrackJob(initRes.jobId, 'COUNTER');
+      return;
+    }
+
+    // Hold job silently before notifying shopkeeper until user finishes UPI payment step
+    const upiLink = `upi://pay?pa=${encodeURIComponent(shop!.upiId!)}&pn=${encodeURIComponent(
+      shop!.shopName
+    )}&am=${initRes.estimatedPrice}&cu=INR&tn=${encodeURIComponent(`PrintCart Token ${initRes.tokenNumber}`)}`;
+    const upiQrDataUrl = await QRCode.toDataURL(upiLink, { width: 240, margin: 1 });
+    setPendingUpiConfirm({
+      jobId: initRes.jobId,
+      tokenNumber: initRes.tokenNumber,
+      amount: initRes.estimatedPrice,
+      upiLink,
+      upiQrDataUrl,
+    });
+  };
+
+  const handleUpiConfirmChoice = async (method: 'UPI_PAID' | 'COUNTER') => {
+    if (!pendingUpiConfirm || confirmingUpi) return;
+    unlockVoiceAudio();
+    try {
+      setConfirmingUpi(true);
+      await confirmAndTrackJob(pendingUpiConfirm.jobId, method);
+      setPendingUpiConfirm(null);
+    } catch (err: any) {
+      alert(err.message || 'Could not confirm request. Please try again.');
+    } finally {
+      setConfirmingUpi(false);
+    }
+  };
+
   // Submit Normal Print Job
   const handleNormalSubmit = async () => {
     if (!selectedFile || !shop) return;
+    unlockVoiceAudio();
 
     try {
       setIsUploading(true);
@@ -409,6 +504,7 @@ export const ShopUploadPage: React.FC = () => {
           colorMode,
           sides,
           customerName: customerName.trim() || 'Walk-in',
+          paymentMethod: paymentChoice === 'UPI' && shop.upiId ? 'UPI_PAID' : 'COUNTER',
         }),
       });
 
@@ -436,15 +532,8 @@ export const ShopUploadPage: React.FC = () => {
         throw new Error('Upload to storage failed');
       }
 
-      // 3. Confirm upload
-      setUploadProgress('Notifying shopkeeper counter...');
-      await apiFetch(`/public/jobs/${initRes.jobId}/confirm`, {
-        method: 'POST',
-      });
-
-      // 4. Fetch full job status for tracking
-      const fullJob = await apiFetch<{ job: JobStatusData }>(`/public/jobs/${initRes.jobId}`);
-      setActiveJob(fullJob.job);
+      // 3. Either confirm immediately (Counter Pay) or open Pre-Request UPI Payment Step
+      await finalizeOrPromptPayment(initRes);
     } catch (err: any) {
       alert(err.message || 'Upload failed. Please try again.');
     } finally {
@@ -459,6 +548,7 @@ export const ShopUploadPage: React.FC = () => {
       alert('Please select both Front and Back photos of the ID card.');
       return;
     }
+    unlockVoiceAudio();
 
     try {
       setIsUploading(true);
@@ -546,7 +636,7 @@ export const ShopUploadPage: React.FC = () => {
       const mergedPdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
 
       // 2. Initialize ID_CARD job on server
-      setUploadProgress('Sending to shop counter...');
+      setUploadProgress('Preparing print request...');
       const initRes = await apiFetch<JobInitResponse>(`/public/shops/${shop.slug}/jobs/init`, {
         method: 'POST',
         body: JSON.stringify({
@@ -559,6 +649,7 @@ export const ShopUploadPage: React.FC = () => {
           colorMode: 'COLOR',
           sides: 'SINGLE',
           customerName: customerName.trim() || 'Walk-in ID Card',
+          paymentMethod: paymentChoice === 'UPI' && shop.upiId ? 'UPI_PAID' : 'COUNTER',
         }),
       });
 
@@ -585,14 +676,8 @@ export const ShopUploadPage: React.FC = () => {
         throw new Error('Upload to storage failed');
       }
 
-      // 4. Confirm upload
-      await apiFetch(`/public/jobs/${initRes.jobId}/confirm`, {
-        method: 'POST',
-      });
-
-      // 5. Track live job
-      const fullJob = await apiFetch<{ job: JobStatusData }>(`/public/jobs/${initRes.jobId}`);
-      setActiveJob(fullJob.job);
+      // 4. Confirm immediately (Counter Pay) or open Pre-Request UPI Payment Step
+      await finalizeOrPromptPayment(initRes);
     } catch (err: any) {
       alert(err.message || 'ID Card merge failed. Please try again.');
     } finally {
@@ -684,13 +769,6 @@ export const ShopUploadPage: React.FC = () => {
     if (isPrinting) stepIndex = 3;
     if (isCompleted) stepIndex = 4;
 
-    const upiLink =
-      activeJob.shop.upiId && activeJob.estimatedPrice > 0
-        ? `upi://pay?pa=${encodeURIComponent(activeJob.shop.upiId)}&pn=${encodeURIComponent(
-            activeJob.shop.shopName
-          )}&am=${activeJob.estimatedPrice}&cu=INR&tn=PrintCart%20Token%20${activeJob.tokenNumber}`
-        : null;
-
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col justify-between p-4 sm:p-6">
         <div className="max-w-md w-full mx-auto space-y-4">
@@ -730,11 +808,54 @@ export const ShopUploadPage: React.FC = () => {
               </p>
             </div>
 
-            {/* Price Badge */}
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-slate-100 text-slate-900 font-black text-lg">
-              <span className="text-xs font-semibold text-slate-500">Total:</span>
-              <span>₹{activeJob.estimatedPrice}</span>
+            {/* Price & Payment Status Badge */}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-slate-100 text-slate-900 font-black text-lg">
+                <span className="text-xs font-semibold text-slate-500">Total:</span>
+                <span>₹{activeJob.estimatedPrice}</span>
+              </div>
+              <span
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-extrabold border ${
+                  activeJob.paymentMethod === 'UPI_PAID'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                }`}
+              >
+                {activeJob.paymentMethod === 'UPI_PAID' ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{t.paidUpiBadge}</span>
+                  </>
+                ) : (
+                  <>
+                    <Banknote className="w-3.5 h-3.5" />
+                    <span>{t.payCounterBadge}</span>
+                  </>
+                )}
+              </span>
             </div>
+
+            {/* Print Approval Live Voice Banner */}
+            {(isPrinting || isCompleted) && (
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 to-sky-50 border border-emerald-200 flex items-center justify-between gap-2 text-left">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 animate-bounce">
+                    <Volume2 className="w-4 h-4" />
+                  </div>
+                  <p className="text-xs font-extrabold text-emerald-900 leading-snug">
+                    {t.printingVoiceBanner}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => notifyCustomerPrintApproved(lang, activeJob.tokenNumber, 'PRINTING')}
+                  className="px-2.5 py-1.5 rounded-lg bg-white border border-emerald-200 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50 shrink-0"
+                  title="Replay voice"
+                >
+                  🔊
+                </button>
+              </div>
+            )}
 
             {/* REJECTED STATE */}
             {isRejected ? (
@@ -789,21 +910,6 @@ export const ShopUploadPage: React.FC = () => {
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
-
-            {/* Optional 1-Tap UPI Payment */}
-            {upiLink && !isRejected && (
-              <div className="pt-2">
-                <a
-                  href={upiLink}
-                  className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-2xl shadow-md transition flex items-center justify-center gap-2 text-sm"
-                >
-                  <CreditCard className="w-4 h-4" />
-                  <span>
-                    {t.payUpi} (₹{activeJob.estimatedPrice})
-                  </span>
-                </a>
               </div>
             )}
 
@@ -1297,6 +1403,60 @@ export const ShopUploadPage: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Pre-Request Payment Method Selector (Shown before sending request to counter) */}
+        <div className="bg-white rounded-3xl border border-slate-200 p-4 space-y-2.5 shadow-sm">
+          <span className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+            {t.payOptionTitle}
+          </span>
+          <div className={`grid ${shop.upiId ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
+            <button
+              type="button"
+              onClick={() => setPaymentChoice('COUNTER')}
+              className={`p-3 rounded-2xl border text-left transition flex items-start gap-2.5 ${
+                paymentChoice === 'COUNTER' || !shop.upiId
+                  ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/20'
+                  : 'border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <Banknote className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold text-slate-900 leading-tight">
+                  {t.payCounterTitle}
+                </p>
+                <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                  {t.payCounterSub}
+                </p>
+              </div>
+            </button>
+
+            {shop.upiId && (
+              <button
+                type="button"
+                onClick={() => setPaymentChoice('UPI')}
+                className={`p-3 rounded-2xl border text-left transition flex items-start gap-2.5 ${
+                  paymentChoice === 'UPI'
+                    ? 'border-emerald-600 bg-emerald-50/70 ring-2 ring-emerald-500/20'
+                    : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <Smartphone className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-extrabold text-slate-900 leading-tight">
+                    {t.payUpiNowTitle}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
+                    {t.payUpiNowSub}
+                  </p>
+                </div>
+              </button>
+            )}
+          </div>
+        </div>
       </main>
 
       {/* Sticky Bottom Bar */}
@@ -1319,7 +1479,11 @@ export const ShopUploadPage: React.FC = () => {
               (activeTab === 'ID_CARD' && (!frontImage || !backImage))
             }
             onClick={activeTab === 'NORMAL' ? handleNormalSubmit : handleIdCardSubmit}
-            className="flex-1 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-extrabold rounded-2xl shadow-md shadow-blue-500/25 flex items-center justify-center gap-2 text-sm transition"
+            className={`flex-1 py-3.5 px-4 disabled:opacity-40 text-white font-extrabold rounded-2xl shadow-md flex items-center justify-center gap-2 text-sm transition ${
+              paymentChoice === 'UPI' && shop.upiId
+                ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/25'
+                : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/25'
+            }`}
           >
             {isUploading ? (
               <>
@@ -1328,13 +1492,94 @@ export const ShopUploadPage: React.FC = () => {
               </>
             ) : (
               <>
-                <span>{t.sendToCounter}</span>
+                <span>
+                  {paymentChoice === 'UPI' && shop.upiId ? t.payAndSend : t.sendToCounter}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
         </div>
       </footer>
+
+      {/* Pre-Request UPI Payment Modal (Only notifies shopkeeper after payment confirmation!) */}
+      {pendingUpiConfirm && (
+        <div className="fixed inset-0 z-[65] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 text-center relative animate-in fade-in zoom-in-95">
+            <button
+              type="button"
+              disabled={confirmingUpi}
+              onClick={() => setPendingUpiConfirm(null)}
+              className="absolute top-3.5 right-3.5 p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+              title="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                Token #{pendingUpiConfirm.tokenNumber} Ready
+              </span>
+              <h3 className="text-lg font-black text-slate-950 mt-2">
+                {lang === 'en' ? `Pay ₹${pendingUpiConfirm.amount} via UPI` : `UPI से ₹${pendingUpiConfirm.amount} पेमेंट करें`}
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {shop.shopName} • <span className="font-mono text-slate-700">{shop.upiId}</span>
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 inline-block mx-auto">
+              <img
+                src={pendingUpiConfirm.upiQrDataUrl}
+                alt="Shop UPI QR"
+                className="w-44 h-44 mx-auto rounded-lg"
+              />
+              <p className="text-[10px] font-semibold text-slate-500 mt-1.5">
+                {lang === 'en' ? 'Scan with any UPI app or tap button below' : 'किसी भी UPI ऐप से स्कैन करें या नीचे बटन दबाएँ'}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <a
+                href={pendingUpiConfirm.upiLink}
+                className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 transition"
+              >
+                <Smartphone className="w-4 h-4 text-emerald-400" />
+                <span>{lang === 'en' ? `Open GPay / PhonePe (₹${pendingUpiConfirm.amount})` : `GPay / PhonePe खोलें (₹${pendingUpiConfirm.amount})`}</span>
+                <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+              </a>
+
+              <button
+                type="button"
+                disabled={confirmingUpi}
+                onClick={() => handleUpiConfirmChoice('UPI_PAID')}
+                className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 transition disabled:opacity-50"
+              >
+                {confirmingUpi ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{lang === 'en' ? 'Sending Request...' : 'रिक्वेस्ट भेज रहे हैं...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{lang === 'en' ? 'Payment Done — Send Print Request ✓' : 'पेमेंट हो गई — प्रिंट रिक्वेस्ट भेजें ✓'}</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                disabled={confirmingUpi}
+                onClick={() => handleUpiConfirmChoice('COUNTER')}
+                className="w-full py-2 text-xs font-bold text-slate-500 hover:text-slate-800 transition"
+              >
+                {lang === 'en' ? 'Unable to pay online? Pay at Counter →' : 'ऑनलाइन नहीं हुआ? काउंटर पर कैश दें →'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* In-Browser Document / Image Editor Modal (Option 1 + Option 2) */}
       {editorSession && (

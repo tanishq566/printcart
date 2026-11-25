@@ -98,6 +98,7 @@ router.post('/shops/:slug/jobs/init', publicUploadLimiter, async (req: Request, 
       colorMode = 'BW',
       sides = 'SINGLE',
       customerName = 'Walk-in',
+      paymentMethod = 'COUNTER',
     } = req.body;
 
     // MIME allowlist validation
@@ -119,6 +120,7 @@ router.post('/shops/:slug/jobs/init', publicUploadLimiter, async (req: Request, 
     const validColorMode = colorMode === 'COLOR' ? 'COLOR' : 'BW';
     const validSides = sides === 'DOUBLE' ? 'DOUBLE' : 'SINGLE';
     const validJobType = jobType === 'ID_CARD' ? 'ID_CARD' : 'NORMAL';
+    const validPaymentMethod = paymentMethod === 'UPI_PAID' ? 'UPI_PAID' : 'COUNTER';
 
     // Calculate Estimated Price
     let estimatedPrice = 0;
@@ -151,7 +153,8 @@ router.post('/shops/:slug/jobs/init', publicUploadLimiter, async (req: Request, 
 
     // Object key format: shops/:shopId/:timestamp-:rand.:ext
     const ext = mimeType === 'application/pdf' ? 'pdf' : mimeType === 'image/png' ? 'png' : 'jpg';
-    const cleanFileName = (fileName ? String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_') : 'document') + '.' + ext;
+    const rawBase = fileName ? String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_') : 'document';
+    const cleanFileName = rawBase.toLowerCase().endsWith(`.${ext}`) ? rawBase : `${rawBase}.${ext}`;
     const objectKey = `shops/${shop.id}/${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${ext}`;
 
     // Expiry: 15 minutes TTL
@@ -173,6 +176,7 @@ router.post('/shops/:slug/jobs/init', publicUploadLimiter, async (req: Request, 
         colorMode: validColorMode,
         sides: validSides,
         estimatedPrice,
+        paymentMethod: validPaymentMethod,
         status: 'UPLOADING',
         expiresAt,
       },
@@ -224,9 +228,20 @@ router.post('/jobs/:jobId/confirm', async (req: Request, res: Response): Promise
       return;
     }
 
+    const bodyPayment = req.body?.paymentMethod;
+    const nextPaymentMethod =
+      bodyPayment === 'UPI_PAID'
+        ? 'UPI_PAID'
+        : bodyPayment === 'COUNTER'
+        ? 'COUNTER'
+        : job.paymentMethod;
+
     const updatedJob = await prisma.printJob.update({
       where: { id: jobId },
-      data: { status: 'PENDING' },
+      data: {
+        status: 'PENDING',
+        paymentMethod: nextPaymentMethod,
+      },
     });
 
     // Real-time broadcast to Shopkeeper room
@@ -243,6 +258,7 @@ router.post('/jobs/:jobId/confirm', async (req: Request, res: Response): Promise
         colorMode: updatedJob.colorMode,
         sides: updatedJob.sides,
         estimatedPrice: updatedJob.estimatedPrice,
+        paymentMethod: updatedJob.paymentMethod,
         status: 'PENDING',
         createdAt: updatedJob.createdAt.toISOString(),
         expiresAt: updatedJob.expiresAt.toISOString(),
@@ -262,6 +278,7 @@ router.post('/jobs/:jobId/confirm', async (req: Request, res: Response): Promise
         tokenNumber: updatedJob.tokenNumber,
         status: updatedJob.status,
         estimatedPrice: updatedJob.estimatedPrice,
+        paymentMethod: updatedJob.paymentMethod,
       },
     });
   } catch (error: any) {
@@ -291,6 +308,7 @@ router.get('/jobs/:jobId', async (req: Request, res: Response): Promise<void> =>
         colorMode: true,
         sides: true,
         estimatedPrice: true,
+        paymentMethod: true,
         status: true,
         rejectReason: true,
         createdAt: true,

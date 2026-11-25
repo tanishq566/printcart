@@ -36,6 +36,7 @@ router.get('/pending', async (req: Request, res: Response): Promise<void> => {
         colorMode: true,
         sides: true,
         estimatedPrice: true,
+        paymentMethod: true,
         status: true,
         createdAt: true,
         expiresAt: true,
