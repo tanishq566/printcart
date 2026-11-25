@@ -10,6 +10,7 @@ import {
   downloadPosterPng,
   downloadPosterPdf,
 } from '../lib/posterGenerator';
+import { printDocumentViaFrame } from '../lib/printHelper';
 import {
   Printer,
   ShieldCheck,
@@ -500,6 +501,8 @@ export const DashboardPage: React.FC = () => {
   const [reprintUndo, setReprintUndo] = useState<{
     tokenNumber: number;
     blobUrl: string;
+    mimeType: string | null;
+    rotation: number;
     secondsLeft: number;
   } | null>(null);
 
@@ -625,6 +628,8 @@ export const DashboardPage: React.FC = () => {
     let active = true;
     setLoadingPreview(true);
     setPdfPage(1);
+    setRotation(0);
+    setZoomLevel(1);
 
     apiFetch<{ previewUrl: string; mimeType: string; fileName: string; pageCount: number }>(
       `/jobs/${selectedJobId}/preview-url`
@@ -722,15 +727,11 @@ export const DashboardPage: React.FC = () => {
     if (!selectedJobId || !previewBlobUrl) return;
     try {
       setIsPrintingAction(true);
+      const currentMime = previewMime;
+      const currentRot = rotation;
       await apiFetch(`/jobs/${selectedJobId}/printing`, { method: 'POST' });
-      if (printFrameRef.current) {
-        printFrameRef.current.src = previewBlobUrl;
-        printFrameRef.current.onload = () => {
-          try { printFrameRef.current?.contentWindow?.focus(); printFrameRef.current?.contentWindow?.print(); }
-          catch (e) { window.open(previewBlobUrl, '_blank')?.print(); }
-        };
-      } else { window.open(previewBlobUrl, '_blank')?.print(); }
-      await completeAndWipe(selectedJobId, previewBlobUrl);
+      await printDocumentViaFrame(printFrameRef.current, previewBlobUrl, currentMime, currentRot);
+      await completeAndWipe(selectedJobId, previewBlobUrl, currentMime, currentRot);
     } catch (err: any) {
       alert(err.message || 'Print action failed');
     } finally {
@@ -738,11 +739,22 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  const completeAndWipe = async (jobId: string, currentBlobUrl: string) => {
+  const completeAndWipe = async (
+    jobId: string,
+    currentBlobUrl: string,
+    currentMime: string | null = previewMime,
+    currentRot = rotation
+  ) => {
     const targetJob = jobs.find((j) => j.id === jobId);
     const tokenNum = targetJob?.tokenNumber || 0;
     await apiFetch(`/jobs/${jobId}/complete`, { method: 'POST' });
-    setReprintUndo({ tokenNumber: tokenNum, blobUrl: currentBlobUrl, secondsLeft: 30 });
+    setReprintUndo({
+      tokenNumber: tokenNum,
+      blobUrl: currentBlobUrl,
+      mimeType: currentMime,
+      rotation: currentRot,
+      secondsLeft: 30,
+    });
     setJobs((prev) => prev.filter((j) => j.id !== jobId));
     setSelectedJobId((curr) => {
       if (curr === jobId) {
@@ -756,10 +768,12 @@ export const DashboardPage: React.FC = () => {
 
   const handleReprintFromRAM = () => {
     if (!reprintUndo) return;
-    if (printFrameRef.current) {
-      printFrameRef.current.src = reprintUndo.blobUrl;
-      printFrameRef.current.onload = () => { printFrameRef.current?.contentWindow?.print(); };
-    } else { window.open(reprintUndo.blobUrl, '_blank')?.print(); }
+    void printDocumentViaFrame(
+      printFrameRef.current,
+      reprintUndo.blobUrl,
+      reprintUndo.mimeType,
+      reprintUndo.rotation
+    );
   };
 
   const handleReject = async (reason: string) => {
@@ -818,7 +832,11 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="h-screen flex bg-slate-900 text-slate-100 overflow-hidden font-sans">
-      <iframe ref={printFrameRef} className="hidden" title="print-frame" />
+      <iframe
+        ref={printFrameRef}
+        className="fixed -left-[9999px] top-0 w-[210mm] h-[297mm] opacity-0 pointer-events-none border-0"
+        title="print-frame"
+      />
 
       {/* Sidebar */}
       <Sidebar
