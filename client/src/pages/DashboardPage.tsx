@@ -49,13 +49,15 @@ import {
   Maximize2,
   Crop,
   Monitor,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch } from '../lib/api';
 import { UpgradeModal } from '../components/UpgradeModal';
 import { usePwaInstall } from '../hooks/usePwaInstall';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface PrintJobCard {
   id: string;
@@ -531,6 +533,9 @@ export const DashboardPage: React.FC = () => {
   const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
   const [previewMime, setPreviewMime] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewRetryTick, setPreviewRetryTick] = useState(0);
+  const [pdfDocVersion, setPdfDocVersion] = useState(0);
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
   const [rotation, setRotation] = useState<number>(0);
   const [pdfPage, setPdfPage] = useState<number>(1);
@@ -562,10 +567,19 @@ export const DashboardPage: React.FC = () => {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfDocRef = useRef<any>(null);
+  const renderTaskRef = useRef<any>(null);
   const socketRef = useRef<Socket | null>(null);
   const printFrameRef = useRef<HTMLIFrameElement | null>(null);
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
+  const jobsRef = useRef<PrintJobCard[]>(jobs);
+  jobsRef.current = jobs;
+  const selectedJobIdRef = useRef<string | null>(selectedJobId);
+  selectedJobIdRef.current = selectedJobId;
+  const shopEditorSessionRef = useRef(shopEditorSession);
+  shopEditorSessionRef.current = shopEditorSession;
+  const isPrintingActionRef = useRef(isPrintingAction);
+  isPrintingActionRef.current = isPrintingAction;
 
   // Unlock browser speech/audio permissions on first dashboard click
   useEffect(() => {
@@ -596,16 +610,18 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  const loadQueue = async () => {
+  const loadQueue = async (silent = false) => {
     try {
-      setLoadingQueue(true);
+      if (!silent) setLoadingQueue(true);
       const res = await apiFetch<{ jobs: PrintJobCard[] }>('/jobs/pending');
       setJobs(res.jobs);
-      if (res.jobs.length > 0 && !selectedJobId) setSelectedJobId(res.jobs[0].id);
+      if (res.jobs.length > 0 && !selectedJobIdRef.current) {
+        setSelectedJobId(res.jobs[0].id);
+      }
     } catch (err) {
       console.error('Queue fetch error:', err);
     } finally {
-      setLoadingQueue(false);
+      if (!silent) setLoadingQueue(false);
     }
   };
 
@@ -617,6 +633,18 @@ export const DashboardPage: React.FC = () => {
   }, [isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        loadQueue(true);
+        loadStats();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     if (!shop) return;
     const token = localStorage.getItem('printcart_token');
     const socket = io({ path: '/socket.io', auth: { token }, transports: ['websocket', 'polling'] });
@@ -624,6 +652,8 @@ export const DashboardPage: React.FC = () => {
     socket.on('connect', () => {
       setSocketConnected(true);
       socket.emit('shop:join', shop.id);
+      loadQueue(true);
+      loadStats();
     });
     socket.on('disconnect', () => setSocketConnected(false));
     socket.on('job:new', (newJob: PrintJobCard) => {
@@ -631,25 +661,29 @@ export const DashboardPage: React.FC = () => {
         if (prev.some((j) => j.id === newJob.id)) return prev;
         return [newJob, ...prev];
       });
-      setSelectedJobId((curr) => curr || newJob.id);
+      // Immediately switch preview to the new customer print (PDF or JPG/PNG)
+      if (!shopEditorSessionRef.current && !isPrintingActionRef.current) {
+        setQueueFilter('ALL');
+        setSelectedJobId(newJob.id);
+      }
       announcePrintRequest(newJob.tokenNumber, newJob.paymentMethod);
       loadStats();
     });
     socket.on('job:status', (payload: { jobId: string; status: string }) => {
       if (['COMPLETED', 'REJECTED', 'EXPIRED'].includes(payload.status)) {
-        setJobs((prev) => prev.filter((j) => j.id !== payload.jobId));
-        setSelectedJobId((curr) => {
-          if (curr === payload.jobId) {
-            const remaining = jobs.filter((j) => j.id !== payload.jobId);
-            return remaining.length > 0 ? remaining[0].id : null;
-          }
-          return curr;
-        });
+        const remaining = jobsRef.current.filter((j) => j.id !== payload.jobId);
+        jobsRef.current = remaining;
+        setJobs(remaining);
+        setSelectedJobId((curr) => (curr === payload.jobId ? remaining[0]?.id ?? null : curr));
         loadStats();
       } else {
-        setJobs((prev) =>
-          prev.map((j) => (j.id === payload.jobId ? { ...j, status: payload.status as any } : j))
-        );
+        setJobs((prev) => {
+          const next = prev.map((j) =>
+            j.id === payload.jobId ? { ...j, status: payload.status as any } : j
+          );
+          jobsRef.current = next;
+          return next;
+        });
       }
     });
 
@@ -672,71 +706,208 @@ export const DashboardPage: React.FC = () => {
     if (!selectedJobId) {
       setPreviewBlobUrl(null);
       setPreviewMime(null);
+      setPreviewError(null);
+      setLoadingPreview(false);
+      pdfDocRef.current = null;
       setShopEditorState(undefined);
       return;
     }
+
     let active = true;
+    const outerController = new AbortController();
     setLoadingPreview(true);
+    setPreviewError(null);
+    setPreviewBlobUrl(null);
+    setPreviewMime(null);
     setPdfPage(1);
+    setPdfTotalPages(1);
     setRotation(0);
     setZoomLevel(1);
+    pdfDocRef.current = null;
     setShopEditorState(undefined);
 
-    apiFetch<{ previewUrl: string; mimeType: string; fileName: string; pageCount: number }>(
-      `/jobs/${selectedJobId}/preview-url`
-    )
-      .then(async (res) => {
-        if (!active) return;
-        let previewTarget = res.previewUrl;
-        if (previewTarget.startsWith('http://localhost') || previewTarget.startsWith('http://127.0.0.1')) {
-          try {
-            const parsed = new URL(previewTarget);
-            previewTarget = parsed.pathname + parsed.search;
-          } catch {
-            // fallback
-          }
-        }
-        const fileRes = await fetch(previewTarget);
-        const blob = await fileRes.blob();
-        if (!active) return;
-        const blobUrl = URL.createObjectURL(blob);
-        setPreviewBlobUrl(blobUrl);
-        setPreviewMime(res.mimeType);
-        if (res.mimeType === 'application/pdf') {
-          const arrayBuffer = await blob.arrayBuffer();
-          const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-          if (active) {
-            pdfDocRef.current = doc;
-            setPdfTotalPages(doc.numPages);
-            renderPdfPage(doc, 1, zoomLevel, rotation);
-          }
-        }
-      })
-      .catch((err) => { console.warn('Preview error:', err); setPreviewBlobUrl(null); })
-      .finally(() => { if (active) setLoadingPreview(false); });
+    const waitMs = (ms: number) =>
+      new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, ms);
+        outerController.signal.addEventListener('abort', () => {
+          clearTimeout(t);
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      });
 
-    return () => { active = false; };
-  }, [selectedJobId]);
+    const fetchValidBlob = async (url: string, headers: Record<string, string> = {}): Promise<Blob> => {
+      const timeoutCtrl = new AbortController();
+      const onOuterAbort = () => timeoutCtrl.abort();
+      outerController.signal.addEventListener('abort', onOuterAbort, { once: true });
+      const timeoutId = setTimeout(() => timeoutCtrl.abort(), 15000);
+      try {
+        const response = await fetch(url, {
+          headers,
+          credentials: url.startsWith('/api/') ? 'include' : 'same-origin',
+          cache: 'no-store',
+          signal: timeoutCtrl.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Storage HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        if (!blob || blob.size === 0) {
+          throw new Error('Empty file received');
+        }
+        const bt = (blob.type || '').toLowerCase();
+        if (bt.includes('application/json') || bt.includes('text/html')) {
+          throw new Error('Invalid file payload received');
+        }
+        return blob;
+      } finally {
+        clearTimeout(timeoutId);
+        outerController.signal.removeEventListener('abort', onOuterAbort);
+      }
+    };
+
+    const loadPreview = async () => {
+      const meta = await apiFetch<{ previewUrl: string; mimeType: string; fileName: string; pageCount: number }>(
+        `/jobs/${selectedJobId}/preview-url`
+      );
+      if (!active) return;
+
+      let previewTarget = meta.previewUrl;
+      if (previewTarget.startsWith('http://localhost') || previewTarget.startsWith('http://127.0.0.1')) {
+        try {
+          const parsed = new URL(previewTarget);
+          previewTarget = parsed.pathname + parsed.search;
+        } catch {
+          // keep original URL
+        }
+      }
+
+      const authToken = localStorage.getItem('printcart_token');
+      const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+      const proxyUrl = `/api/jobs/${selectedJobId}/file?t=${Date.now()}`;
+
+      let blob: Blob | null = null;
+      let lastErr: any = null;
+
+      // Attempt 1 & 2: Direct preview URL, then Attempt 3 & 4: Authenticated backend stream fallback
+      const attempts: Array<{ url: string; headers?: Record<string, string>; delay?: number }> = [
+        { url: previewTarget },
+        { url: previewTarget, delay: 350 },
+        { url: proxyUrl, headers: authHeaders, delay: 250 },
+        { url: proxyUrl, headers: authHeaders, delay: 700 },
+      ];
+
+      for (const attempt of attempts) {
+        if (!active || outerController.signal.aborted) return;
+        if (attempt.delay) await waitMs(attempt.delay);
+        try {
+          blob = await fetchValidBlob(attempt.url, attempt.headers);
+          break;
+        } catch (err: any) {
+          if (outerController.signal.aborted) return;
+          lastErr = err;
+        }
+      }
+
+      if (!blob) {
+        throw lastErr || new Error('Could not load document preview');
+      }
+      if (!active) return;
+
+      let effectiveMime = (meta.mimeType || blob.type || '').toLowerCase();
+      if (effectiveMime === 'image/jpg') effectiveMime = 'image/jpeg';
+      const lowerName = (meta.fileName || '').toLowerCase();
+      const isPdf = effectiveMime.includes('pdf') || lowerName.endsWith('.pdf');
+      if (isPdf) effectiveMime = 'application/pdf';
+
+      const normalizedBlob =
+        effectiveMime && blob.type !== effectiveMime ? blob.slice(0, blob.size, effectiveMime) : blob;
+      const blobUrl = URL.createObjectURL(normalizedBlob);
+
+      if (isPdf) {
+        const arrayBuffer = await normalizedBlob.arrayBuffer();
+        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+        if (!active) {
+          URL.revokeObjectURL(blobUrl);
+          return;
+        }
+        pdfDocRef.current = doc;
+        setPdfTotalPages(doc.numPages);
+        setPreviewBlobUrl(blobUrl);
+        setPreviewMime('application/pdf');
+        setPdfDocVersion((v) => v + 1);
+      } else {
+        // Pre-verify image decode so JPG/PNG never flashes or sticks on broken state
+        await new Promise<void>((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('Image format could not be decoded'));
+          img.src = blobUrl;
+        });
+        if (!active) {
+          URL.revokeObjectURL(blobUrl);
+          return;
+        }
+        pdfDocRef.current = null;
+        setPreviewBlobUrl(blobUrl);
+        setPreviewMime(effectiveMime || 'image/jpeg');
+      }
+    };
+
+    loadPreview()
+      .catch((err: any) => {
+        if (!active || err?.name === 'AbortError') return;
+        console.warn('Preview error:', err);
+        setPreviewBlobUrl(null);
+        setPreviewMime(null);
+        setPreviewError(err?.message || 'Document preview could not be loaded');
+      })
+      .finally(() => {
+        if (active) setLoadingPreview(false);
+      });
+
+    return () => {
+      active = false;
+      outerController.abort();
+    };
+  }, [selectedJobId, previewRetryTick]);
 
   const renderPdfPage = async (doc: any, pageNum: number, zoom: number, rot: number) => {
     if (!doc || !canvasRef.current) return;
     try {
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch {
+          // ignore previous cancellation
+        }
+        renderTaskRef.current = null;
+      }
       const page = await doc.getPage(pageNum);
       const viewport = page.getViewport({ scale: zoom * 1.3, rotation: rot });
       const canvas = canvasRef.current;
+      if (!canvas) return;
       const context = canvas.getContext('2d');
       if (!context) return;
       canvas.height = viewport.height;
       canvas.width = viewport.width;
-      await page.render({ canvasContext: context, viewport }).promise;
-    } catch (e) { console.warn('PDF render error:', e); }
+      const task = page.render({ canvasContext: context, viewport });
+      renderTaskRef.current = task;
+      await task.promise;
+      if (renderTaskRef.current === task) {
+        renderTaskRef.current = null;
+      }
+    } catch (e: any) {
+      if (e?.name !== 'RenderingCancelledException') {
+        console.warn('PDF render error:', e);
+      }
+    }
   };
 
   useEffect(() => {
-    if (pdfDocRef.current && previewMime === 'application/pdf') {
-      renderPdfPage(pdfDocRef.current, pdfPage, zoomLevel, rotation);
+    if (!loadingPreview && previewMime === 'application/pdf' && pdfDocRef.current && canvasRef.current) {
+      void renderPdfPage(pdfDocRef.current, pdfPage, zoomLevel, rotation);
     }
-  }, [pdfPage, zoomLevel, rotation]);
+  }, [pdfDocVersion, loadingPreview, previewMime, pdfPage, zoomLevel, rotation]);
 
   useEffect(() => {
     if (!reprintUndo) return;
@@ -876,14 +1047,10 @@ export const DashboardPage: React.FC = () => {
       rotation: currentRot,
       secondsLeft: 30,
     });
-    setJobs((prev) => prev.filter((j) => j.id !== jobId));
-    setSelectedJobId((curr) => {
-      if (curr === jobId) {
-        const remaining = jobs.filter((j) => j.id !== jobId);
-        return remaining.length > 0 ? remaining[0].id : null;
-      }
-      return curr;
-    });
+    const remaining = jobsRef.current.filter((j) => j.id !== jobId);
+    jobsRef.current = remaining;
+    setJobs(remaining);
+    setSelectedJobId((curr) => (curr === jobId ? remaining[0]?.id ?? null : curr));
     loadStats();
   };
 
@@ -899,19 +1066,16 @@ export const DashboardPage: React.FC = () => {
 
   const handleReject = async (reason: string) => {
     if (!selectedJobId) return;
+    const targetJobId = selectedJobId;
     try {
       setIsRejecting(true);
-      await apiFetch(`/jobs/${selectedJobId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
+      await apiFetch(`/jobs/${targetJobId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
       setShowRejectMenu(false);
       setCustomRejectReason('');
-      setJobs((prev) => prev.filter((j) => j.id !== selectedJobId));
-      setSelectedJobId((curr) => {
-        if (curr === selectedJobId) {
-          const remaining = jobs.filter((j) => j.id !== selectedJobId);
-          return remaining.length > 0 ? remaining[0].id : null;
-        }
-        return curr;
-      });
+      const remaining = jobsRef.current.filter((j) => j.id !== targetJobId);
+      jobsRef.current = remaining;
+      setJobs(remaining);
+      setSelectedJobId((curr) => (curr === targetJobId ? remaining[0]?.id ?? null : curr));
       loadStats();
     } catch (err: any) {
       alert(err.message || 'Reject failed');
@@ -1233,21 +1397,45 @@ export const DashboardPage: React.FC = () => {
                 {/* Preview body */}
                 <div className="flex-1 min-h-0 overflow-auto p-4 flex items-center justify-center bg-slate-900/50 relative">
                   {loadingPreview ? (
-                    <div className="text-center text-slate-500">
+                    <div className="text-center text-slate-400">
                       <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-blue-500" />
-                      <span className="text-xs">Fetching document from ephemeral buffer...</span>
+                      <span className="text-xs font-medium">Loading instant preview...</span>
+                    </div>
+                  ) : previewError ? (
+                    <div className="text-center space-y-3 max-w-xs px-4">
+                      <AlertCircle className="w-8 h-8 text-amber-400 mx-auto" />
+                      <p className="text-xs text-slate-300 font-semibold">{previewError}</p>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewRetryTick((t) => t + 1)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Retry Preview</span>
+                      </button>
                     </div>
                   ) : previewMime === 'application/pdf' ? (
                     <canvas ref={canvasRef} className="shadow-2xl rounded-sm max-w-full max-h-full" />
                   ) : previewBlobUrl ? (
                     <img
+                      key={`${selectedJob.id}-${previewBlobUrl}`}
                       src={previewBlobUrl}
                       alt="Document Preview"
+                      onError={() => setPreviewError('Image preview failed to decode.')}
                       style={{ transform: `scale(${zoomLevel}) rotate(${rotation}deg)`, transition: 'transform 0.15s ease-out' }}
                       className="max-h-full max-w-full object-contain shadow-2xl rounded"
                     />
                   ) : (
-                    <div className="text-slate-500 text-xs">Preview unavailable</div>
+                    <div className="text-center space-y-2 text-slate-500">
+                      <span className="text-xs block">Preview unavailable</span>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewRetryTick((t) => t + 1)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                      >
+                        <RefreshCw className="w-3 h-3" /> Reload
+                      </button>
+                    </div>
                   )}
                 </div>
 

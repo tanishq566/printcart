@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
+import fsp from 'fs/promises';
 import prisma from '../lib/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getStorageService } from '../services/storage/index.js';
+import { getStorageService, LocalStorageAdapter } from '../services/storage/index.js';
 import { getIO } from '../lib/socket.js';
+import { env } from '../config/env.js';
 
 const router = Router();
 
@@ -103,6 +105,54 @@ router.get('/:jobId/preview-url', async (req: Request, res: Response): Promise<v
   } catch (error) {
     console.error('Error generating preview URL:', error);
     res.status(500).json({ error: 'Failed to generate preview URL' });
+  }
+});
+
+/**
+ * Stream raw file bytes via authenticated backend proxy (CORS-safe fallback for preview)
+ * GET /api/jobs/:jobId/file
+ */
+router.get('/:jobId/file', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const shopId = req.auth!.shopId;
+    const rawJobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+    const jobId = String(rawJobId);
+
+    const job = await prisma.printJob.findFirst({
+      where: { id: jobId, shopId },
+    });
+
+    if (!job || !job.r2ObjectKey) {
+      res.status(404).json({ error: 'File not found or already deleted' });
+      return;
+    }
+
+    const contentType = job.mimeType || 'application/octet-stream';
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'no-store');
+
+    if (!env.isR2Configured) {
+      const filePath = LocalStorageAdapter.getFilePath(job.r2ObjectKey);
+      const data = await fsp.readFile(filePath);
+      res.set('Content-Length', data.length.toString());
+      res.send(data);
+      return;
+    }
+
+    const storage = getStorageService();
+    const signedUrl = await storage.generateGetUrl(job.r2ObjectKey, 60);
+    const upstream = await fetch(signedUrl);
+    if (!upstream.ok) {
+      res.status(upstream.status).json({ error: 'Failed to stream file from storage' });
+      return;
+    }
+
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.set('Content-Length', buffer.length.toString());
+    res.send(buffer);
+  } catch (error: any) {
+    console.error('Error proxying job file:', error);
+    res.status(error?.code === 'ENOENT' ? 404 : 500).json({ error: 'Failed to read job file' });
   }
 });
 

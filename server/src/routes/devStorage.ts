@@ -63,6 +63,8 @@ router.get(['/download/:key', '/download/*'], async (req, res) => {
 
     res.set('Content-Type', contentTypes[ext] || 'application/octet-stream');
     res.set('Content-Length', stat.size.toString());
+    res.set('Cache-Control', 'no-store');
+    res.set('Access-Control-Allow-Origin', '*');
     res.send(data);
   } catch (err: any) {
     if (err.code === 'ENOENT') {

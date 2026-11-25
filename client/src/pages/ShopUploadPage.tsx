@@ -296,7 +296,17 @@ export const ShopUploadPage: React.FC = () => {
   }, [activeJob?.id]);
 
   const isImageFile = (file: File) =>
-    file.type.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(file.name);
+    file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|bmp)$/i.test(file.name);
+
+  const resolveUploadMime = (file: File): string => {
+    const t = (file.type || '').toLowerCase();
+    if (t === 'image/jpg') return 'image/jpeg';
+    if (t === 'application/pdf' || t === 'image/jpeg' || t === 'image/png') return t;
+    const lower = (file.name || '').toLowerCase();
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.png')) return 'image/png';
+    return 'image/jpeg';
+  };
 
   // Detect PDF Page Count OR launch Document Editor for images
   const handleFileChange = async (file: File) => {
@@ -397,7 +407,9 @@ export const ShopUploadPage: React.FC = () => {
     if (!editorSession) return;
     const raw = editorSession.file;
     try {
-      const needsJpegConvert = raw.type === 'image/webp' || raw.size > 14 * 1024 * 1024;
+      const lowerType = (raw.type || '').toLowerCase();
+      const needsJpegConvert =
+        !['image/jpeg', 'image/png'].includes(lowerType) || raw.size > 14 * 1024 * 1024;
       if (editorSession.target === 'normal') {
         const canvas = await loadFileToCanvas(raw, needsJpegConvert ? 2200 : 1200);
         if (needsJpegConvert) {
@@ -507,12 +519,14 @@ export const ShopUploadPage: React.FC = () => {
       setIsUploading(true);
       setUploadProgress('Preparing upload...');
 
+      const uploadMime = resolveUploadMime(selectedFile);
+
       // 1. Init Job on server
       const initRes = await apiFetch<JobInitResponse>(`/public/shops/${shop.slug}/jobs/init`, {
         method: 'POST',
         body: JSON.stringify({
           fileName: selectedFile.name,
-          mimeType: selectedFile.type,
+          mimeType: uploadMime,
           fileSizeBytes: selectedFile.size,
           jobType: 'NORMAL',
           pageCount,
@@ -539,7 +553,7 @@ export const ShopUploadPage: React.FC = () => {
       const uploadRes = await fetch(uploadTarget, {
         method: 'PUT',
         headers: {
-          'Content-Type': selectedFile.type,
+          'Content-Type': uploadMime,
         },
         body: selectedFile,
       });

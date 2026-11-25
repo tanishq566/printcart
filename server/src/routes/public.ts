@@ -263,6 +263,8 @@ router.post('/jobs/:jobId/confirm', async (req: Request, res: Response): Promise
         customerName: updatedJob.customerName,
         jobType: updatedJob.jobType,
         fileName: updatedJob.fileName,
+        mimeType: updatedJob.mimeType,
+        fileSizeBytes: updatedJob.fileSizeBytes,
         pageCount: updatedJob.pageCount,
         copies: updatedJob.copies,
         colorMode: updatedJob.colorMode,
